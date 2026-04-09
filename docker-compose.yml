@@ -1,0 +1,37 @@
+
+services:
+  newneo4j:
+    image: neo4j:5.26-community
+    container_name: pow-neo4j
+    environment:
+      - NEO4J_AUTH=neo4j/neo4j1234
+      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*,gds.*
+    ports:
+      - "17474:7474"  # HTTP
+      - "17687:7687"  # Bolt
+    volumes:
+      - ./data/neo4j:/data
+      - ./data/neo4j/logs:/logs
+      - ./data/neo4j/import:/var/lib/neo4j/import
+      - ./data/neo4j/plugins:/plugins
+      - ./server/infra/schema.cypher:/docker-entrypoint-initdb.d/init.cypher:ro
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "neo4j1234", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  newredis:
+    image: redis:7.4.7-alpine
+    container_name: pow-redis
+    ports:
+      - "16379:6379"
+    volumes:
+      - ./data/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5

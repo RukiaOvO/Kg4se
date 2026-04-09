@@ -1,0 +1,200 @@
+// 颜色系统
+:root {
+  // 主色调
+  --primary-color: #10b981;
+  --primary-color-hover: #0ea271;
+  --primary-color-active: #0d9668;
+
+  // 信息色
+  --info-color: #3b82f6;
+  --info-color-hover: #2563eb;
+  --info-color-active: #1d4ed8;
+
+  // 成功色
+  --success-color: #10b981;
+  --success-color-hover: #0ea271;
+  --success-color-active: #0d9668;
+
+  // 警告色
+  --warning-color: #f59e0b;
+  --warning-color-hover: #d97706;
+  --warning-color-active: #b45309;
+
+  // 错误色
+  --error-color: #ef4444;
+  --error-color-hover: #dc2626;
+  --error-color-active: #b91c1c;
+
+  // 中性色
+  --text-color: #334155;
+  --text-color-secondary: #64748b;
+  --text-color-disabled: #94a3b8;
+
+  --border-color: #e2e8f0;
+  --border-color-hover: #cbd5e1;
+  --border-color-active: #94a3b8;
+
+  --background-color: #ffffff;
+  --background-color-secondary: #f8fafc;
+  --background-color-tertiary: #f1f5f9;
+
+  // 分割线
+  --divider-color: #e2e8f0;
+
+  // 圆角
+  --border-radius-sm: 4px;
+  --border-radius-base: 8px;
+  --border-radius-lg: 12px;
+  --border-radius-xl: 16px;
+  --border-radius-xxl: 24px;
+
+  // 阴影
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-base: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+
+  // 间距
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-base: 16px;
+  --spacing-md: 24px;
+  --spacing-lg: 32px;
+  --spacing-xl: 48px;
+  --spacing-xxl: 64px;
+
+  // 字体
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-family-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  // 字号
+  --font-size-xs: 12px;
+  --font-size-sm: 14px;
+  --font-size-base: 16px;
+  --font-size-lg: 18px;
+  --font-size-xl: 20px;
+  --font-size-xxl: 24px;
+  --font-size-xxxl: 32px;
+
+  // 字重
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  // 行高
+  --line-height-tight: 1.25;
+  --line-height-base: 1.5;
+  --line-height-loose: 1.75;
+
+  // z-index 层级
+  --z-index-dropdown: 1000;
+  --z-index-sticky: 1020;
+  --z-index-fixed: 1030;
+  --z-index-modal-backdrop: 1040;
+  --z-index-modal: 1050;
+  --z-index-popover: 1060;
+  --z-index-tooltip: 1070;
+
+  // 动画
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-base: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: 500ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  // 布局
+  --header-height: 64px;
+  --sidebar-width: 256px;
+  --content-max-width: 1200px;
+}
+
+// 暗色主题变量
+[data-theme="dark"] {
+  --text-color: #e2e8f0;
+  --text-color-secondary: #94a3b8;
+  --text-color-disabled: #64748b;
+
+  --border-color: #475569;
+  --border-color-hover: #64748b;
+  --border-color-active: #94a3b8;
+
+  --background-color: #0f172a;
+  --background-color-secondary: #1e293b;
+  --background-color-tertiary: #334155;
+
+  --divider-color: #334155;
+}
+
+// 混入
+@mixin text-ellipsis($lines: 1) {
+  @if $lines == 1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  } @else {
+    display: -webkit-box;
+    -webkit-line-clamp: $lines;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+}
+
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+@mixin card-shadow {
+  box-shadow: var(--shadow-md);
+  transition: box-shadow var(--transition-base);
+
+  &:hover {
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+@mixin responsive($breakpoint) {
+  @if $breakpoint == sm {
+    @media (min-width: 640px) { @content; }
+  } @else if $breakpoint == md {
+    @media (min-width: 768px) { @content; }
+  } @else if $breakpoint == lg {
+    @media (min-width: 1024px) { @content; }
+  } @else if $breakpoint == xl {
+    @media (min-width: 1280px) { @content; }
+  } @else if $breakpoint == xxl {
+    @media (min-width: 1536px) { @content; }
+  }
+}
+
+// 工具类
+.color-primary { color: var(--primary-color); }
+.bg-primary { background-color: var(--primary-color); }
+
+.color-success { color: var(--success-color); }
+.bg-success { background-color: var(--success-color); }
+
+.color-warning { color: var(--warning-color); }
+.bg-warning { background-color: var(--warning-color); }
+
+.color-error { color: var(--error-color); }
+.bg-error { background-color: var(--error-color); }
+
+.color-info { color: var(--info-color); }
+.bg-info { background-color: var(--info-color); }
+
+.text-ellipsis { @include text-ellipsis; }
+.text-ellipsis-2 { @include text-ellipsis(2); }
+.text-ellipsis-3 { @include text-ellipsis(3); }
+
+.flex-center { @include flex-center; }
+.flex-between { @include flex-between; }
+
+.card-shadow { @include card-shadow; }

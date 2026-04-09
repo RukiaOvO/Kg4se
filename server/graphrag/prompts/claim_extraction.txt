@@ -1,0 +1,213 @@
+你是一个专业的软件工程知识图谱构建专家。
+
+# 核心任务
+
+从以下文本中提取**仅限于软件工程领域**的知识点和关系。
+
+# 文本
+
+{text}
+
+# 实体类型（仅允许以下5种）
+
+1. **KnowledgePoint**：软件工程领域的核心知识点
+   - 示例：设计模式（Singleton, Factory, Observer等）
+   - 数据结构（Binary Tree, Hash Table等）
+   - 算法概念（Dynamic Programming, DFS等）
+   - 面向对象原则（Inheritance, Polymorphism等）
+   - 最佳实践（Refactoring, Clean Code等）
+   - 绝对不包括：通用知识、人物、组织、日期等无关实体
+
+2. **Content**：知识点的具体内容
+   - 定义、说明、示例代码等
+
+3. **Document**：源文档
+   - 教材、论文、博客等
+
+4. **Question**：实践题目
+   - 练习题、编程挑战等
+
+5. **Timestamp**：时间戳
+   - 仅表示文档更新时间
+
+# 关系类型（仅允许以下5种）
+
+1. **BELONGS_TO**：(KnowledgePoint)-[BELONGS_TO]->(KnowledgePoint)
+   - 子知识点属于父知识点
+   - 例：Singleton(单例) BELONGS_TO Design Pattern(设计模式)
+
+2. **FROM**：(KnowledgePoint)-[FROM]->(Document)
+   - 知识点从该文档中提取
+   - 例：Observer Pattern FROM "Design Patterns Book"
+
+3. **PRACTICES_IS**：(Question)-[PRACTICES_IS]->(KnowledgePoint)
+   - 题目中提到了该知识点
+   - 例：LeetCode Problem 1 PRACTICES_IS Binary Tree Search
+
+4. **HAS_TIMESTAMP**：(Document)-[HAS_TIMESTAMP]->(Timestamp)
+   - 文档的更新时间
+   - 例：Tutorial Document HAS_TIMESTAMP 2024-01-15
+
+5. **IS**：(KnowledgePoint)-[IS]->(Content)
+   - 知识点的具体内容
+   - 例：Singleton IS "Create only one instance of a class"
+
+# 提取要求
+
+1. **严格的领域限制**：
+   - 仅提取软件工程领域的知识点
+   - 过滤所有与软件工程无关的实体
+   - 过滤所有不在上述5种关系中的关系
+
+2. **关键词判断**：
+   - 确认实体包含以下至少一个关键词：
+     设计模式、数据结构、算法、编程、架构、并发、测试、安全、
+     代码质量、性能优化、面向对象、函数式编程
+   
+3. **高质量提取**：
+   - 仅提取高置信度的知识点（置信度 > 0.7）
+   - 确保关系的源端和目标端都是有效实体
+   - 每个知识点至少需要有具体含义，不能是模糊概念
+
+4. **避免的内容**：
+   - ❌ 人物名字（如 Gang of Four）
+   - ❌ 公司或组织名
+   - ❌ 日期或时间表达（除了Timestamp节点）
+   - ❌ 通用词汇（如 "something", "thing"）
+   - ❌ 非软件工程领域的知识
+
+# 输出格式
+
+返回 JSON 对象，**只包含5种关系类型**：
+
+```json
+{
+  "entities": [
+    {
+      "id": "entity_001",
+      "name": "设计模式",
+      "type": "KnowledgePoint",
+      "confidence": 0.95,
+      "domain": "software_engineering"
+    },
+    {
+      "id": "entity_002",
+      "name": "单例模式",
+      "type": "KnowledgePoint",
+      "confidence": 0.92,
+      "domain": "software_engineering"
+    },
+    {
+      "id": "entity_003",
+      "name": "具体只能存在一个实例...",
+      "type": "Content",
+      "confidence": 0.90
+    },
+    {
+      "id": "entity_004",
+      "name": "Design Patterns Book",
+      "type": "Document",
+      "confidence": 0.85
+    }
+  ],
+  "relationships": [
+    {
+      "source": "entity_002",
+      "target": "entity_001",
+      "type": "BELONGS_TO",
+      "confidence": 0.95,
+      "reason": "单例模式是设计模式的一种"
+    },
+    {
+      "source": "entity_002",
+      "target": "entity_003",
+      "type": "IS",
+      "confidence": 0.90,
+      "reason": "该内容定义了单例模式"
+    },
+    {
+      "source": "entity_002",
+      "target": "entity_004",
+      "type": "FROM",
+      "confidence": 0.85,
+      "reason": "单例模式在该书中被介绍"
+    }
+  ],
+  "filtered_entities": [],  // 被过滤的无关实体及原因
+  "quality_metrics": {
+    "total_entities_extracted": 4,
+    "valid_entities": 4,
+    "total_relationships": 3,
+    "valid_relationships": 3,
+    "filtering_rate": 0.0
+  }
+}
+```
+
+# 注意事项
+
+- **质量优先于数量**：宁可提取少数高质量实体，也不要包含无关内容
+- **严格过滤**：任何非软件工程领域的实体都应被过滤
+- **关系验证**：所有关系必须恰好是5种类型之一
+- **置信度真实**：给出真实的置信度评分，不要虚高
+    }}
+  ]
+}}
+```
+
+# 注意事项
+
+- 只提取明确的、完整的论断，避免提取描述性片段
+- 论断应该是自洽的，不依赖上下文也能理解
+- 如果论断有多个子句，考虑拆分为多个独立论断
+- 关系必须基于文本证据，不要推测
+- 如果文本中没有明确的论断或关系，返回空数组
+
+# 示例
+
+输入:
+"Transformer 模型采用自注意力机制，能够并行处理序列，因此在训练速度上优于 RNN。实验表明，Transformer 在机器翻译任务上达到了 SOTA 性能。"
+
+输出:
+```json
+{{
+  "claims": [
+    {{
+      "text": "Transformer 模型采用自注意力机制",
+      "type": "fact",
+      "confidence": 1.0,
+      "evidence_span": [0, 20]
+    }},
+    {{
+      "text": "Transformer 能够并行处理序列",
+      "type": "fact",
+      "confidence": 1.0,
+      "evidence_span": [21, 38]
+    }},
+    {{
+      "text": "Transformer 在训练速度上优于 RNN",
+      "type": "conclusion",
+      "confidence": 0.9,
+      "evidence_span": [39, 60]
+    }},
+    {{
+      "text": "Transformer 在机器翻译任务上达到了 SOTA 性能",
+      "type": "fact",
+      "confidence": 0.95,
+      "evidence_span": [66, 92]
+    }}
+  ],
+  "relations": [
+    {{
+      "source_claim_index": 1,
+      "target_claim_index": 2,
+      "relation_type": "CAUSES",
+      "confidence": 0.85,
+      "evidence": "能够并行处理序列，因此在训练速度上优于"
+    }}
+  ]
+}}
+```
+
+现在请处理上述文本。
+

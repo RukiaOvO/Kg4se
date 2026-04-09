@@ -1,0 +1,94 @@
+# 谓词白名单与映射配置
+# 优化版本：仅包含5种标准谓词，用于软件工程领域知识提取
+
+# 配置版本号（用于治理元数据追踪）
+version: "2.0.0-software-engineering"
+
+# 标准谓词集合（仅包含5种）
+standard:
+  - BELONGS_TO       # 子知识点属于父知识点
+  - FROM             # 知识点从文档中提取
+  - PRACTICES_IS     # 题目中提到知识点
+  - HAS_TIMESTAMP    # 文档的更新时间戳
+  - IS               # 知识点的内容是什么
+
+# 自然语言谓词映射到标准谓词
+# 注意：只有这5个标准谓词被允许，所有其他映射都会被拒绝
+mappings:
+  # BELONGS_TO 映射
+  "属于": BELONGS_TO
+  "隶属于": BELONGS_TO
+  "归于": BELONGS_TO
+  "是...的子知识点": BELONGS_TO
+  "属于...知识点": BELONGS_TO
+  
+  # FROM 映射
+  "来自": FROM
+  "源自": FROM
+  "来源于": FROM
+  "提取自": FROM
+  "从...提取": FROM
+  "在...中提到": FROM
+  
+  # PRACTICES_IS 映射
+  "题目包含": PRACTICES_IS
+  "练习": PRACTICES_IS
+  "应用": PRACTICES_IS
+  "实践": PRACTICES_IS
+  "用于...练习": PRACTICES_IS
+  
+  # HAS_TIMESTAMP 映射
+  "更新于": HAS_TIMESTAMP
+  "更新时间": HAS_TIMESTAMP
+  "创建于": HAS_TIMESTAMP
+  "发布于": HAS_TIMESTAMP
+  
+  # IS 映射
+  "是": IS
+  "定义为": IS
+  "定义": IS
+  "内容是": IS
+  "描述为": IS
+
+# 类型约束（头类型, 谓词, 尾类型）白名单
+# 仅允许软件工程领域的知识点间关系
+type_constraints:
+  # BELONGS_TO: KnowledgePoint -> KnowledgePoint
+  - source: KnowledgePoint
+    predicate: BELONGS_TO
+    target: [KnowledgePoint]
+  
+  # FROM: KnowledgePoint -> Document
+  - source: KnowledgePoint
+    predicate: FROM
+    target: [Document]
+  
+  # PRACTICES_IS: Question -> KnowledgePoint
+  - source: Question
+    predicate: PRACTICES_IS
+    target: [KnowledgePoint]
+  
+  # HAS_TIMESTAMP: Document -> Timestamp
+  - source: Document
+    predicate: HAS_TIMESTAMP
+    target: [Timestamp]
+  
+  # IS: KnowledgePoint -> Content
+  - source: KnowledgePoint
+    predicate: IS
+    target: [Content]
+
+# 未匹配谓词处理策略
+unmatched_strategy:
+  # "reject" - 直接拒收所有未映射谓词
+  mode: reject
+  
+  # 若使用 review 模式（已禁用），复核队列阈值
+  review_threshold: 0
+  
+  # 禁用自动扩表
+  auto_expand:
+    enabled: false
+    min_occurrences: 0
+    min_confidence: 0.0
+

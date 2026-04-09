@@ -1,0 +1,51 @@
+# [run]
+# source = tests
+# omit =
+#     tests/conftest.py
+#     tests/verify_quick.py
+#     tests/test_documents_integration.py
+#     tests/test_documents_final.py
+#     tests/test_documents_fullstack.py
+#     tests/test_documents_code.py
+#     tests/test_domain_optimization.py
+#     tests/test_graph_api.py
+#     tests/test_kg_optimization_integration.py
+#     tests/graphrag/stages/test_stage0_2_manual.py
+#     tests/graphrag/stages/test_stage4_theme_builder.py
+#     tests/test_services_coverage_extended.py
+#     htmlcov/*
+#     main.py
+#     graphrag/*
+
+[run]
+# 包含应用代码目录
+source = 
+    graphrag
+    infra
+    models
+    routes
+    services
+omit = 
+    */__pycache__/*
+    */venv/*
+    */.venv/*
+    tests/*
+    htmlcov/*
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+omit =
+    tests/conftest.py
+    tests/verify_quick.py
+    tests/test_documents_integration.py
+    tests/test_documents_final.py
+    tests/test_documents_fullstack.py
+    tests/test_documents_code.py
+    tests/test_domain_optimization.py
+    tests/test_graph_api.py
+    tests/test_kg_optimization_integration.py
+    tests/graphrag/stages/test_stage0_2_manual.py
+    tests/graphrag/stages/test_stage4_theme_builder.py
+    tests/test_services_coverage_extended.py
