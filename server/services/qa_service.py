@@ -231,9 +231,6 @@ class QAService:
                 max_tokens=1024
             )
             
-            # 保存问答记录
-            self._save_qa_record(question, answer, used_kg, session_id)
-            
             return {
                 "success": True,
                 "answer": answer,
