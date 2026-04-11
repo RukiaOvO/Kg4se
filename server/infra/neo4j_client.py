@@ -40,7 +40,7 @@ class Neo4jClient:
                 # Verify connection by attempting a simple query
                 with self.driver.session() as session:
                     session.run("RETURN 1")
-                print(f"✅ Neo4j connection established (attempt {attempt + 1})")
+                print(f"Neo4j connection established (attempt {attempt + 1})")
                 return
             except (ServiceUnavailable, OSError, Exception) as e:
                 # 对于认证错误等非连接问题，直接抛出
@@ -50,7 +50,7 @@ class Neo4jClient:
                 
                 # 对于连接问题，进行重试
                 if attempt < max_retries - 1:
-                    print(f"⏳ Waiting for Neo4j Bolt to be ready... (attempt {attempt + 1}/{max_retries})")
+                    print(f"Waiting for Neo4j Bolt to be ready... (attempt {attempt + 1}/{max_retries})")
                     time.sleep(retry_delay)
                 else:
                     raise ConnectionError(

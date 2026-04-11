@@ -39,7 +39,7 @@ class AISegmenter:
             # 获取提供商名称用于显示
             provider_info = AIProviderFactory.get_provider_info(self.provider)
             provider_name = provider_info.get("name", self.provider)
-            print(f"✅ AI Segmenter initialized with {provider_name} (model: {self.model})")
+            print(f"AI Segmenter initialized with {provider_name} (model: {self.model})")
             
         except ValueError as e:
             raise ValueError(f"Failed to initialize AI segmenter: {str(e)}")

@@ -1,9 +1,16 @@
 """FastAPI application entry point."""
+import os
+from dotenv import load_dotenv
+
+# 在导入其他模块之前加载 .env 文件
+load_dotenv()
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes import upload, ingest, graph, settings, knowledge_card, qa
 from infra.neo4j_client import neo4j_client
+
 
 
 @asynccontextmanager
@@ -12,9 +19,9 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize Neo4j connection
     try:
         neo4j_client.initialize()
-        print("✅ Neo4j client initialized successfully")
+        print("Neo4j client initialized successfully")
     except Exception as e:
-        print(f"⚠️  Warning: Failed to initialize Neo4j client: {e}")
+        print(f"Warning: Failed to initialize Neo4j client: {e}")
         print("   The API will start but database operations will fail.")
     
     yield
@@ -22,7 +29,7 @@ async def lifespan(app: FastAPI):
     # Shutdown: Close connections
     if neo4j_client.driver:
         neo4j_client.close()
-        print("✅ Neo4j client closed")
+        print("Neo4j client closed")
 
 
 app = FastAPI(

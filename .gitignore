@@ -45,6 +45,7 @@ uploads/
 *.db
 *.sqlite
 scripts/
+updateLog/
 
 # Logs
 *.log

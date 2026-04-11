@@ -33,7 +33,7 @@ try:
     ai_segmenter = AISegmenter()
 except ValueError as e:
     ai_segmenter = None
-    print(f"⚠️  AI segmentation disabled: {str(e)}")
+    print(f"AI segmentation disabled: {str(e)}")
 
 # Initialize Redis queue
 queue = get_queue()

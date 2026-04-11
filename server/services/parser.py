@@ -1,10 +1,79 @@
 """Document parsing services."""
 import re
+import os
 from typing import List, Dict, Any
 from pathlib import Path
 import fitz  # PyMuPDF
 from models.document import Chunk
+from bs4 import BeautifulSoup
 
+# 百度 OCR
+try:
+    from aip import AipOcr
+    BAIDU_OCR_AVAILABLE = True
+except ImportError:
+    BAIDU_OCR_AVAILABLE = False
+
+
+class BaiduOCRClient:
+    """百度 OCR API 客户端"""
+    
+    def __init__(self):
+        self.client = None
+        self._initialize()
+    
+    def _initialize(self):
+        """初始化百度 OCR 客户端"""
+        if not BAIDU_OCR_AVAILABLE:
+            print("[百度OCR] 库未安装，OCR 功能将被禁用")
+            return
+        
+        app_id = os.environ.get('BAIDU_OCR_APP_ID', '')
+        api_key = os.environ.get('BAIDU_OCR_API_KEY', '')
+        secret_key = os.environ.get('BAIDU_OCR_SECRET_KEY', '')
+
+        if not app_id or not api_key or not secret_key:
+            print("[百度OCR] 未配置 API 密钥，OCR 功能将被禁用")
+            return
+        
+        try:
+            self.client = AipOcr(app_id, api_key, secret_key)
+            print("[百度OCR] 客户端初始化成功")
+        except Exception as e:
+            print(f"[百度OCR] 初始化失败: {e}")
+    
+    def recognize(self, image_bytes: bytes) -> str:
+        """
+        使用百度 OCR 识别图片文字
+        
+        Args:
+            image_bytes: 图片字节数据
+        
+        Returns:
+            识别出的文本
+        """
+        if not self.client:
+            return ""
+        
+        try:
+            # 调用通用文字识别（高精度版）
+            result = self.client.basicAccurate(image_bytes)
+            
+            if 'words_result' not in result:
+                print(f"[百度OCR] 识别失败: {result.get('error_msg', 'Unknown error')}")
+                return ""
+            
+            # 提取识别结果
+            text = "\n".join(item['words'] for item in result['words_result'])
+            print(f"[百度OCR] 识别成功，文本长度: {len(text)}")
+            return text
+        
+        except Exception as e:
+            print(f"[百度OCR] 识别异常: {e}")
+            return ""
+
+# 全局 OCR 客户端实例
+baidu_ocr_client = BaiduOCRClient()
 
 class Parser:
     """Base parser class."""
@@ -213,10 +282,80 @@ class Parser:
 
 
 class PDFParser(Parser):
-    """PDF parser using PyMuPDF."""
+    """PDF parser using Docling with fallback to PyMuPDF + Baidu OCR."""
     
+    def __init__(self, chunk_size: int = 2000):
+        """
+        Initialize PDF parser.
+        
+        Args:
+            chunk_size: Maximum characters per chunk (default: 2000)
+        """
+        super().__init__(chunk_size=chunk_size)
+        # 检查百度 OCR 是否可用
+        self.use_ocr = BAIDU_OCR_AVAILABLE and baidu_ocr_client.client
+        # 检查 Docling 是否可用
+        self._docling_available = self._check_docling()
+
+    def _check_docling(self) -> bool:
+        """检查 Docling 是否可用"""
+        try:
+            from docling.document_converter import DocumentConverter
+            return True
+        except ImportError:
+            return False
+
     def parse(self, file_path: str) -> tuple[str, List[Chunk]]:
-        """Parse PDF file."""
+        """Parse PDF file.优先使用 Docling，失败后回退到 PyMuPDF."""
+        # 首先尝试使用 Docling
+        if self._docling_available:
+            try:
+                return self._parse_with_docling(file_path)
+            except Exception as e:
+                print(f"[Docling] 解析失败，回退到 PyMuPDF: {e}")
+        
+        # 使用 PyMuPDF 作为回退
+        return self._parse_with_pymupdf(file_path)
+
+    def _parse_with_docling(self, file_path: str) -> tuple[str, List[Chunk]]:
+        """使用 Docling 解析 PDF"""
+        from docling.document_converter import DocumentConverter
+        from docling.datamodel.document import Document
+        
+        print(f"[Docling] 开始解析: {file_path}")
+        
+        converter = DocumentConverter()
+        result: Document = converter.convert(file_path)
+        
+        full_text = ""
+        chunks = []
+        doc_id = Path(file_path).stem
+        
+        for element in result.elements:
+            element_type = type(element).__name__
+            
+            if hasattr(element, 'content') and element.content:
+                text = element.content.strip()
+                if text:
+                    full_text += text + "\n\n"
+                    
+                    chunk = Chunk(
+                        doc_id=doc_id,
+                        chunk_id=f"c_{len(chunks)}",
+                        text=text,
+                        meta={
+                            "type": element_type.lower(),
+                            "page": getattr(element, 'page_num', 1),
+                            "source": "docling"
+                        }
+                    )
+                    chunks.append(chunk)
+        
+        print(f"[Docling] 解析完成: {len(chunks)} 个文本块")
+        return full_text, chunks
+
+    def _parse_with_pymupdf(self, file_path: str) -> tuple[str, List[Chunk]]:
+        """使用 PyMuPDF 解析 PDF（回退方案）"""
         doc = fitz.open(file_path)
         chunks = []
         full_text_parts = []
@@ -224,9 +363,20 @@ class PDFParser(Parser):
         
         for page_num in range(len(doc)):
             page = doc[page_num]
+
+            # 1. 首先尝试提取嵌入文本
             text = page.get_text()
+
+            # 2. 如果文本很少或为空，尝试 OCR
+            if self.use_ocr and (not text.strip() or len(text.strip()) < 50):
+                ocr_text = self._extract_text_with_ocr(page)
+                if ocr_text and len(ocr_text) > len(text):
+                    text = ocr_text
+                    print(f"[OCR] 页面 {page_num + 1} 使用百度 OCR 提取")
             
+            # 3. 如果仍然没有文本，跳过该页面
             if not text.strip():
+                print(f"[PDF解析] 页面 {page_num + 1} 无有效文本")
                 continue
             
             full_text_parts.append(text)
@@ -239,7 +389,9 @@ class PDFParser(Parser):
                 meta={
                     "page": page_num + 1,
                     "section": None,
-                    "offset": [0, len(text)]
+                    "offset": [0, len(text)],
+                    "ocr_used": self.use_ocr and (len(page.get_text()) < 50),
+                    "source": "pymupdf"
                 }
             )
             chunks.extend(page_chunks)
@@ -247,6 +399,40 @@ class PDFParser(Parser):
         doc.close()
         full_text = "\n\n".join(full_text_parts)
         return full_text, chunks
+
+    def _extract_text_with_ocr(self, page) -> str:
+        """Extract text from page images using Baidu OCR."""
+        if not self.use_ocr:
+            return ""
+        
+        try:
+            # 获取页面中的所有图片
+            images = page.get_images(full=True)
+            if not images:
+                return ""
+            
+            ocr_text = []
+            
+            for img_index, img in enumerate(images):
+                # 获取图片信息
+                xref = img[0]
+                base_image = page.parent.extract_image(xref)
+                if not base_image:
+                    continue
+                
+                # 获取图片字节数据
+                img_bytes = base_image["image"]
+                
+                # 使用百度 OCR 识别
+                text = baidu_ocr_client.recognize(img_bytes)
+                if text.strip():
+                    ocr_text.append(text.strip())
+            
+            return "\n\n".join(ocr_text)
+        
+        except Exception as e:
+            print(f"[OCR] 页面处理失败: {e}")
+            return ""
 
 
 class MarkdownParser(Parser):
@@ -304,6 +490,57 @@ class MarkdownParser(Parser):
                     chunk_idx += len(section_chunks)
         
         return content, chunks
+
+    def _extract_text_with_ocr(self, page) -> str:
+        """Extract text from page images using OCR."""
+        if not OCR_AVAILABLE:
+            return ""
+        
+        try:
+            # 获取页面中的所有图片
+            images = page.get_images(full=True)
+            if not images:
+                return ""
+            
+            ocr_text = []
+            
+            for img_index, img in enumerate(images):
+                # 获取图片信息
+                xref = img[0]
+                base_image = page.parent.extract_image(xref)
+                if not base_image:
+                    continue
+                
+                # 获取图片字节数据
+                img_bytes = base_image["image"]
+                width = base_image["width"]
+                height = base_image["height"]
+                
+                try:
+                    # 使用 PIL 打开图片
+                    image = Image.frombytes(
+                        "RGB", 
+                        (width, height), 
+                        img_bytes,
+                        "raw",
+                        "BGR"
+                    )
+                    
+                    # 使用 Tesseract OCR 提取文本
+                    # 添加中文和英文语言支持
+                    text = pytesseract.image_to_string(image, lang="chi_sim+eng")
+                    if text.strip():
+                        ocr_text.append(text.strip())
+                
+                except Exception as e:
+                    print(f"[OCR] 处理图片 {img_index} 失败: {e}")
+                    continue
+            
+            return "\n\n".join(ocr_text)
+        
+        except Exception as e:
+            print(f"[OCR] 页面处理失败: {e}")
+            return ""
 
 
 class TxtParser(Parser):
@@ -570,6 +807,47 @@ class ExcelParser(Parser):
         except Exception as e:
             raise ValueError(f"Failed to parse Excel file: {e}")
 
+class WebParser(Parser):
+    """Web page parser using requests and BeautifulSoup."""
+    
+    def parse(self, url: str) -> tuple[str, List[Chunk]]:
+        """Parse web page content."""
+        try:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 提取主要内容
+            main_content = soup.find('main') or soup.find('article') or soup.body
+            
+            if main_content:
+                text = main_content.get_text(separator='\n', strip=True)
+            else:
+                text = soup.get_text(separator='\n', strip=True)
+            
+            # 清理文本
+            text = re.sub(r'\n+', '\n\n', text)
+            text = text.strip()
+            
+            doc_id = hash(url)
+            chunks = self._smart_chunk(
+                text=text,
+                doc_id=str(doc_id),
+                base_chunk_id="c",
+                meta={
+                    "page": 1,
+                    "section": None,
+                    "offset": [0, len(text)],
+                    "url": url
+                }
+            )
+            
+            return text, chunks
+        
+        except Exception as e:
+            print(f"[网页解析] 爬取失败: {e}")
+            return "", []
 
 class ParserFactory:
     """Factory for creating parsers based on file type."""
@@ -594,6 +872,7 @@ class ParserFactory:
             "excel": ExcelParser,
             "xlsx": ExcelParser,
             "xls": ExcelParser,
+            "web": WebParser,
         }
         
         parser_class = parsers.get(kind.lower())

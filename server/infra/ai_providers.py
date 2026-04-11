@@ -239,7 +239,7 @@ class OpenAICompatibleClient(BaseAIClient):
         if not normalized_base_url.startswith(('http://', 'https://')):
             raise ValueError(f"Invalid base_url format: {base_url}. Must start with http:// or https://")
         
-        print(f"🔗 [AI客户端] 初始化 OpenAI 兼容客户端")
+        print(f"[AI客户端] 初始化 OpenAI 兼容客户端")
         print(f"   Model: {model}")
         print(f"   Base URL: {normalized_base_url}")
         
@@ -376,7 +376,9 @@ class AIProviderFactory:
         "ernie": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop",  # 文心一言 API
         "minimax": "https://api.minimax.chat/v1",
         "doubao": "https://ark.cn-beijing.volces.com/api/v3",
-        "ollama": "http://localhost:11434/v1"
+        "ollama": "http://localhost:11434/v1",
+        "nvidia": "https://integrate.api.nvidia.com/v1",
+        "modelscope": "https://api-inference.modelscope.cn/v1"
     }
     
     # 默认模型配置
@@ -393,6 +395,8 @@ class AIProviderFactory:
         "minimax": "abab6.5s-chat",
         "doubao": "doubao-pro-4k",
         "ollama": "llama3",
+        "nvidia": "MiniMax/MiniMax-M2.5",
+        "modelscope": "MiniMax/MiniMax-M2.5",
         "mock": "mock"
     }
     
@@ -447,7 +451,7 @@ class AIProviderFactory:
             return GrokClient(api_key, model, base_url)
         
         # 其他所有 OpenAI 兼容的提供商
-        if provider in ["deepseek", "qwen", "glm", "moonshot", "ernie", "minimax", "doubao", "ollama"]:
+        if provider in ["deepseek", "qwen", "glm", "moonshot", "ernie", "minimax", "doubao", "ollama", "nvidia", "modelscope"]:
             # Ollama 不需要真实的 API key
             if provider == "ollama":
                 api_key = api_key or "ollama"
@@ -544,6 +548,18 @@ class AIProviderFactory:
                 "requires_api_key": False
             },
             {
+                "id": "nvidia",
+                "name": "NVIDIA NIM",
+                "default_model": cls.DEFAULT_MODELS["nvidia"],
+                "requires_api_key": True
+            },
+            {
+                "id": "modelscope",
+                "name": "ModelScope",
+                "default_model": cls.DEFAULT_MODELS["modelscope"],
+                "requires_api_key": False
+            },
+            {
                 "id": "mock",
                 "name": "Mock (测试模式)",
                 "default_model": "mock",
@@ -584,6 +600,8 @@ def get_ai_client(
         "minimax": "abab6.5s-chat",
         "doubao": "doubao-pro-32k",
         "ollama": "llama2",
+        "modelscope": "MiniMax/MiniMax-M2.5",
+        "nvidia": "MiniMax/MiniMax-M2.5",
         "mock": "mock"
     }
     
@@ -612,7 +630,7 @@ def get_ai_client(
             raise ValueError("Google Gemini requires api_key")
         return GoogleGeminiClient(api_key=api_key, model=model, base_url=base_url)
     
-    elif provider in ["qwen", "glm", "deepseek", "moonshot", "ernie", "minimax", "doubao", "ollama"]:
+    elif provider in ["qwen", "glm", "deepseek", "moonshot", "ernie", "minimax", "doubao", "ollama", "modelscope"]:
         if provider != "ollama" and not api_key:
             raise ValueError(f"{provider} requires api_key")
         # All these use OpenAI-compatible interface
@@ -626,7 +644,9 @@ def get_ai_client(
                 "ernie": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat",
                 "minimax": "https://api.minimaxi.chat/v1",
                 "doubao": "https://ark.cn-beijing.volces.com/api/v3",
-                "ollama": "http://localhost:11434/v1"
+                "ollama": "http://localhost:11434/v1",
+                "modelscope": "https://api-inference.modelscope.cn/v1",
+                "nvidia": "https://integrate.api.nvidia.com/v1"
             }
             base_url = base_urls.get(provider)
         return OpenAICompatibleClient(api_key=api_key or "dummy", model=model, base_url=base_url)

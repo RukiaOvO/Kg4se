@@ -172,11 +172,3 @@ pytest -m integration      # requires Neo4j/Redis
 pytest -m api              # FastAPI routes
 pytest --cov=. --cov-report=html
 ```
-
-## Contributors
-
-Ye Yu · Hongbang Zhang · Jingwen Zhang · Jingyi Wang · Jiayi Li · Shaohua Huang · Tianshuo Zhang · Fangbo Liu · Xin Chen
-
-## License
-
-MIT License

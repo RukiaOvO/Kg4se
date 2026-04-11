@@ -37,6 +37,8 @@ class Settings(BaseSettings):
         "minimax",          # MiniMax
         "doubao",           # 字节豆包
         "ollama",           # Ollama 本地模型
+        "nvidia",           # NNVIDIA NIM
+        "modelscope",       # ModelScope
         "mock"              # Mock 模式
     ] = "mock"
     
@@ -111,12 +113,6 @@ class Settings(BaseSettings):
     
     # 构建版本配置
     build_version_prefix: str = "v2.0"          # 构建版本前缀
-    
-    # Web搜索配置（用于CRAG）
-    web_search_api: Literal["serpapi", "google", "bing", "mock"] = "mock"  # 搜索API类型
-    web_search_api_key: Optional[str] = None     # 搜索API密钥
-    web_search_endpoint: Optional[str] = None    # 搜索API端点
-    web_search_results: int = 3                  # 搜索结果数量
 
 
 # Global settings instance

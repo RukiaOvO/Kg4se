@@ -17,7 +17,7 @@ class AskRequest(BaseModel):
     question: str
     conversation_history: Optional[List[Message]] = None
     use_kg: bool = True  # Use knowledge graph context
-    use_crag: bool = False  # Use CRAG enhancement
+    session_id: Optional[str] = None  # Session ID for continuous conversation
 
 
 class AskResponse(BaseModel):
@@ -25,8 +25,6 @@ class AskResponse(BaseModel):
     success: bool
     answer: str
     used_context: bool
-    use_crag: bool = False
-    crag_evaluation: Optional[Dict[str, Any]] = None
     context_snippet: Optional[str] = None
     error: Optional[str] = None
 
@@ -83,7 +81,7 @@ async def ask_question(request: AskRequest) -> AskResponse:
             question=request.question,
             conversation_history=history,
             use_kg=request.use_kg,
-            use_crag=request.use_crag
+            session_id=request.session_id
         )
         
         if not result["success"]:
@@ -92,18 +90,7 @@ async def ask_question(request: AskRequest) -> AskResponse:
                 detail=result.get("error", "Failed to answer question")
             )
         
-        # 确保返回CRAG相关字段
-        response_data = {
-            "success": result.get("success"),
-            "answer": result.get("answer"),
-            "used_context": result.get("used_context"),
-            "use_crag": result.get("used_crag", False),
-            "crag_evaluation": result.get("crag_evaluation"),
-            "context_snippet": result.get("context_snippet"),
-            "error": result.get("error")
-        }
-        
-        return AskResponse(**response_data)
+        return AskResponse(**result)
     
     except HTTPException:
         raise

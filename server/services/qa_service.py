@@ -5,7 +5,6 @@ from typing import Optional, List, Dict, Any
 from infra.config import Settings
 from infra.ai_providers import get_ai_client
 from infra.neo4j_client import neo4j_client
-from services.crag_service import crag_service
 
 
 class QAService:
@@ -25,10 +24,10 @@ class QAService:
                 model=self.settings.ai_model,
                 base_url=self.settings.ai_base_url
             )
-            print(f"✅ [QA服务] AI客户端初始化成功: {self.settings.ai_provider}")
+            print(f"[QA服务] AI客户端初始化成功: {self.settings.ai_provider}")
             return client
         except Exception as e:
-            print(f"⚠️ [QA服务] AI客户端初始化失败: {e}")
+            print(f"[QA服务] AI客户端初始化失败: {e}")
             return None
     
     def query_knowledge_graph(self, question: str, limit: int = 5) -> Dict[str, Any]:
@@ -94,7 +93,9 @@ class QAService:
                 "keywords": keywords
             }
         except Exception as e:
-            print(f"❌ [QA服务] 知识图谱查询失败: {e}")
+            print(f"[QA服务] 知识图谱查询失败: {e}")
+            import traceback
+            traceback.print_exc()
             return {"entities": [], "keywords": []}
     
     def _extract_keywords(self, question: str) -> List[str]:
@@ -160,7 +161,7 @@ class QAService:
         question: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         use_kg: bool = True,
-        use_crag: bool = False
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Answer user's question using AI and knowledge graph.
@@ -169,7 +170,6 @@ class QAService:
             question: User's question
             conversation_history: Previous conversation messages
             use_kg: Whether to use knowledge graph context
-            use_crag: Whether to use CRAG enhancement
             
         Returns:
             Dictionary with answer, used_context, and other metadata
@@ -186,19 +186,12 @@ class QAService:
             # 获取知识图谱上下文
             kg_context = ""
             used_kg = False
-            crag_info = None
             
             if use_kg:
                 kg_data = self.query_knowledge_graph(question)
                 if kg_data.get("entities"):
                     kg_context = self._format_context(kg_data)
                     used_kg = True
-                    
-                    # 使用CRAG增强上下文
-                    if use_crag:
-                        crag_result = crag_service.enhance_context(question, kg_context)
-                        kg_context = crag_result.get("enhanced_context", kg_context)
-                        crag_info = crag_result.get("evaluation", {})
             
             # 构建消息列表
             messages = []
@@ -238,23 +231,19 @@ class QAService:
                 max_tokens=1024
             )
             
-            result = {
+            # 保存问答记录
+            self._save_qa_record(question, answer, used_kg, session_id)
+            
+            return {
                 "success": True,
                 "answer": answer,
                 "used_context": used_kg,
                 "context_snippet": kg_context[:300] if kg_context else None,
                 "error": None
             }
-            
-            # 添加CRAG信息
-            if use_crag:
-                result["used_crag"] = True
-                result["crag_evaluation"] = crag_info
-            
-            return result
         
         except Exception as e:
-            print(f"❌ [QA服务] 回答问题失败: {e}")
+            print(f"[QA服务] 回答问题失败: {e}")
             import traceback
             traceback.print_exc()
             return {
@@ -323,7 +312,7 @@ class QAService:
             return history
 
         except Exception as e:
-            print(f"❌ [QA服务] 获取历史记录失败: {e}")
+            print(f"[QA服务] 获取历史记录失败: {e}")
             return []
 
     def add_feedback(self, feedback: Dict[str, Any]) -> bool:
@@ -351,11 +340,11 @@ class QAService:
                 feedback_text = feedback.get("feedback", "")
                 helpful = feedback.get("helpful", True)
             else:
-                print(f"⚠️ [QA服务] 不支持的反馈类型: {type(feedback)}")
+                print(f"[QA服务] 不支持的反馈类型: {type(feedback)}")
                 return False
 
             if not qa_id:
-                print("⚠️ [QA服务] 反馈缺少QA ID")
+                print("[QA服务] 反馈缺少QA ID")
                 return False
 
             cypher = """
@@ -378,14 +367,14 @@ class QAService:
             )
 
             if result:
-                print(f"✅ [QA服务] 反馈已保存: {qa_id}")
+                print(f"[QA服务] 反馈已保存: {qa_id}")
                 return True
             else:
-                print(f"⚠️ [QA服务] 未找到QA记录: {qa_id}")
+                print(f"[QA服务] 未找到QA记录: {qa_id}")
                 return False
 
         except Exception as e:
-            print(f"❌ [QA服务] 保存反馈失败: {e}")
+            print(f"[QA服务] 保存反馈失败: {e}")
             return False
 
     def get_session_ids(self) -> List[str]:
@@ -406,10 +395,10 @@ class QAService:
             return [record.get("session_id") for record in results if record.get("session_id")]
 
         except Exception as e:
-            print(f"❌ [QA服务] 获取会话ID失败: {e}")
+            print(f"[QA服务] 获取会话ID失败: {e}")
             return []
 
-    def _save_qa_record(self, question: str, answer: str, used_context: bool = False) -> None:
+    def _save_qa_record(self, question: str, answer: str, used_context: bool = False, session_id: Optional[str] = None) -> None:
         """
         保存问答记录到知识图谱。
 
@@ -417,6 +406,7 @@ class QAService:
             question: 用户问题
             answer: AI回答
             used_context: 是否使用了知识图谱上下文
+            session_id: 会话ID，如果未提供则生成新的
         """
         try:
             # 生成唯一ID和时间戳
@@ -424,10 +414,11 @@ class QAService:
             qa_id = f"qa_{uuid4().hex[:12]}"
             timestamp = datetime.now().isoformat()
 
-            # 生成会话ID（基于时间）
-            import hashlib
-            session_hash = hashlib.md5(timestamp.encode()).hexdigest()[:8]
-            session_id = f"session_{session_hash}"
+            # 如果没有提供会话ID，则生成新的
+            if not session_id:
+                import hashlib
+                session_hash = hashlib.md5(timestamp.encode()).hexdigest()[:8]
+                session_id = f"session_{session_hash}"
 
             cypher = """
             CREATE (q:QARecord {
@@ -454,10 +445,10 @@ class QAService:
                 }
             )
 
-            print(f"✅ [QA服务] 问答记录已保存: {qa_id}")
+            print(f"[QA服务] 问答记录已保存: {qa_id}, 会话ID: {session_id}")
 
         except Exception as e:
-            print(f"⚠️ [QA服务] 保存问答记录失败: {e}")
+            print(f"[QA服务] 保存问答记录失败: {e}")
 
     def clear_old_records(self, days: int = 30) -> int:
         """
@@ -480,12 +471,12 @@ class QAService:
             result = neo4j_client.execute_query(cypher, {"days": days})
             if result and result[0]:
                 deleted_count = result[0].get("deleted_count", 0)
-                print(f"✅ [QA服务] 清理了 {deleted_count} 条旧记录")
+                print(f"[QA服务] 清理了 {deleted_count} 条旧记录")
                 return deleted_count
             return 0
 
         except Exception as e:
-            print(f"❌ [QA服务] 清理旧记录失败: {e}")
+            print(f"[QA服务] 清理旧记录失败: {e}")
             return 0
 
 

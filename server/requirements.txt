@@ -16,6 +16,12 @@ requests==2.31.0
 numpy==1.26.4
 python-docx==1.1.0
 beautifulsoup4==4.12.2
+docling>=0.4.0
+
+
+# 百度 OCR
+baidu-aip>=4.16.13
+chardet>=5.2.0
 
 # GraphRAG
 neo4j-graphrag>=0.5.0

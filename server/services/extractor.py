@@ -53,12 +53,12 @@ class TripletExtractor:
             provider_name = provider_names.get(self.provider, self.provider)
 
             if self.provider != "mock":
-                print(f"✅ 使用 {provider_name}，模型: {self.model}")
+                print(f"使用 {provider_name}，模型: {self.model}")
             else:
-                print("ℹ️  使用 Mock 模式进行三元组提取")
+                print("使用 Mock 模式进行三元组提取")
 
         except ValueError as e:
-            print(f"⚠️  警告: AI 配置错误 ({e})，将使用 mock 模式")
+            print(f"警告: AI 配置错误 ({e})，将使用 mock 模式")
             self.provider = "mock"
             self.client = AIProviderFactory.create_client("mock")
             self.model = "mock"
