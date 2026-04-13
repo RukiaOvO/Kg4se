@@ -3,7 +3,7 @@ import math
 import pytest
 
 from graphrag.models.chunk import ChunkMetadata
-from graphrag.prompts.stages import stage3_claim_extractor as s3
+from graphrag.stages import stage3_claim_extractor as s3
 
 
 class _DummyClient:

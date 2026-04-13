@@ -37,8 +37,9 @@ class Settings(BaseSettings):
         "minimax",          # MiniMax
         "doubao",           # 字节豆包
         "ollama",           # Ollama 本地模型
-        "nvidia",           # NNVIDIA NIM
+        "nvidia",           # NVIDIA NIM
         "modelscope",       # ModelScope
+        "zhizengzeng",      # 智增增 AI
         "mock"              # Mock 模式
     ] = "mock"
     

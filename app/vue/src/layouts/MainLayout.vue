@@ -123,6 +123,10 @@ const menuOptions = computed(() => [
   {
     label: t('navigation.status'),
     key: '/status'
+  },
+  {
+    label: t('navigation.evaluation'),
+    key: '/evaluation'
   }
 ])
 

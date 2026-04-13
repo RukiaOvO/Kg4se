@@ -18,7 +18,7 @@ sys.path.insert(0, str(project_root))
 import pytest
 from unittest.mock import Mock, patch
 
-from graphrag.prompts.stages.stage3_claim_extractor import ClaimExtractor
+from graphrag.stages.stage3_claim_extractor import ClaimExtractor
 from graphrag.models.chunk import ChunkMetadata
 from graphrag.models.claim import Claim, ClaimRelation
 
@@ -119,7 +119,7 @@ def _install_test_mocks(monkeypatch, custom_claims_response=None, custom_nli_res
                 "base_url": "http://test.local"
             }
     
-    from graphrag.prompts.stages import stage3_claim_extractor as s3
+    from graphrag.stages import stage3_claim_extractor as s3
     monkeypatch.setattr(s3, "config_service", _ConfigService, raising=True)
     
     # Mock AIProviderFactory 返回自定义 Mock 客户端
@@ -132,7 +132,7 @@ def _install_test_mocks(monkeypatch, custom_claims_response=None, custom_nli_res
         return custom_client
     
     monkeypatch.setattr(
-        "graphrag.prompts.stages.stage3_claim_extractor.AIProviderFactory.create_client",
+        "graphrag.stages.stage3_claim_extractor.AIProviderFactory.create_client",
         _create_mock_client,
         raising=True
     )

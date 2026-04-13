@@ -19,6 +19,9 @@ AIProviderType = Literal[
     "minimax",          # MiniMax
     "doubao",           # 字节豆包
     "ollama",           # Ollama 本地模型
+    "nvidia",           # NVIDIA NIM
+    "modelscope",       # ModelScope
+    "zhizengzeng",      # 智增增 AI
     "mock"              # Mock 模式（测试用）
 ]
 
@@ -378,7 +381,8 @@ class AIProviderFactory:
         "doubao": "https://ark.cn-beijing.volces.com/api/v3",
         "ollama": "http://localhost:11434/v1",
         "nvidia": "https://integrate.api.nvidia.com/v1",
-        "modelscope": "https://api-inference.modelscope.cn/v1"
+        "modelscope": "https://api-inference.modelscope.cn/v1",
+        "zhizengzeng": "https://api.zhizengzeng.com/v1"
     }
     
     # 默认模型配置
@@ -397,6 +401,7 @@ class AIProviderFactory:
         "ollama": "llama3",
         "nvidia": "MiniMax/MiniMax-M2.5",
         "modelscope": "MiniMax/MiniMax-M2.5",
+        "zhizengzeng": "qwen3-max",
         "mock": "mock"
     }
     
@@ -451,7 +456,7 @@ class AIProviderFactory:
             return GrokClient(api_key, model, base_url)
         
         # 其他所有 OpenAI 兼容的提供商
-        if provider in ["deepseek", "qwen", "glm", "moonshot", "ernie", "minimax", "doubao", "ollama", "nvidia", "modelscope"]:
+        if provider in ["deepseek", "qwen", "glm", "moonshot", "ernie", "minimax", "doubao", "ollama", "nvidia", "modelscope", "zhizengzeng"]:
             # Ollama 不需要真实的 API key
             if provider == "ollama":
                 api_key = api_key or "ollama"
@@ -557,7 +562,13 @@ class AIProviderFactory:
                 "id": "modelscope",
                 "name": "ModelScope",
                 "default_model": cls.DEFAULT_MODELS["modelscope"],
-                "requires_api_key": False
+                "requires_api_key": True
+            },
+            {
+                "id": "zhizengzeng",
+                "name": "ZhiZengZeng",
+                "default_model": cls.DEFAULT_MODELS["zhizengzeng"],
+                "requires_api_key": True
             },
             {
                 "id": "mock",
@@ -602,6 +613,7 @@ def get_ai_client(
         "ollama": "llama2",
         "modelscope": "MiniMax/MiniMax-M2.5",
         "nvidia": "MiniMax/MiniMax-M2.5",
+        "zhizengzeng": "qwen3-max",
         "mock": "mock"
     }
     
@@ -630,7 +642,7 @@ def get_ai_client(
             raise ValueError("Google Gemini requires api_key")
         return GoogleGeminiClient(api_key=api_key, model=model, base_url=base_url)
     
-    elif provider in ["qwen", "glm", "deepseek", "moonshot", "ernie", "minimax", "doubao", "ollama", "modelscope"]:
+    elif provider in ["qwen", "glm", "deepseek", "moonshot", "ernie", "minimax", "doubao", "ollama", "modelscope", "zhizengzeng", "nvidia"]:
         if provider != "ollama" and not api_key:
             raise ValueError(f"{provider} requires api_key")
         # All these use OpenAI-compatible interface
@@ -646,7 +658,8 @@ def get_ai_client(
                 "doubao": "https://ark.cn-beijing.volces.com/api/v3",
                 "ollama": "http://localhost:11434/v1",
                 "modelscope": "https://api-inference.modelscope.cn/v1",
-                "nvidia": "https://integrate.api.nvidia.com/v1"
+                "nvidia": "https://integrate.api.nvidia.com/v1",
+                "zhizengzeng": "https://api.zhizengzeng.com/v1"
             }
             base_url = base_urls.get(provider)
         return OpenAICompatibleClient(api_key=api_key or "dummy", model=model, base_url=base_url)

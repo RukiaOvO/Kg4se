@@ -17,7 +17,7 @@ sys.path.insert(0, str(project_root))
 import types
 import pytest
 
-from graphrag.prompts.stages.stage2_entity_linker import EntityLinker
+from graphrag.stages.stage2_entity_linker import EntityLinker
 from graphrag.models.chunk import ChunkMetadata
 
 # 配置日志为 DEBUG，显示 Stage2 细粒度调试日志
@@ -47,7 +47,7 @@ def _install_test_mocks(monkeypatch):
         allowed_node_types = ["Concept", "Person", "Organization", "Method", "Tool", "Metric"]
         allowed_relations = ["MENTIONS", "DERIVES_FROM", "SIMILAR_TO", "HAS_MEMBER"]
 
-    from graphrag.prompts.stages import stage2_entity_linker as s2
+    from graphrag.stages import stage2_entity_linker as s2
     monkeypatch.setattr(s2, "settings", _Settings, raising=True)
 
     # 2) mock AI Provider 配置，强制使用 provider=mock 避免初始化第三方依赖

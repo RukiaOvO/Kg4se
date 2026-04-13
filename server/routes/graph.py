@@ -1319,3 +1319,101 @@ async def delete_edge(source_id: str, target_id: str, rel_type: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete relationship: {str(e)}")
+
+
+# ========== Bulk Delete Operations ==========
+
+@router.delete("/purge/all")
+async def purge_all_graph(
+    confirm: bool = Query(False, description="Confirm deletion (must be true)"),
+    safety_check: str = Query(None, description="Safety check: must be 'YES_I_AM_SURE'")
+):
+    """
+    清空整个知识图谱（危险操作！）
+    
+    删除所有节点和关系，包括 Document、Concept、Topic 等。
+    
+    Args:
+        confirm: 必须设置为 true
+        safety_check: 必须设置为 'YES_I_AM_SURE'
+    
+    Returns:
+        删除统计信息
+    """
+    if not confirm or safety_check != "YES_I_AM_SURE":
+        raise HTTPException(
+            status_code=400,
+            detail="请确认删除操作：需要设置 confirm=true 和 safety_check='YES_I_AM_SURE'"
+        )
+    
+    try:
+        result = neo4j_client.delete_all_graph_data()
+        return {
+            "message": "知识图谱已完全清空",
+            "deleted_nodes": result["deleted_nodes"],
+            "deleted_relationships": result["deleted_relationships"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+@router.delete("/purge/concepts")
+async def purge_all_concepts(
+    confirm: bool = Query(False, description="Confirm deletion (must be true)")
+):
+    """
+    清空所有概念节点（Concept）
+    
+    删除所有 Concept 节点及其相关关系。
+    
+    Args:
+        confirm: 必须设置为 true
+    
+    Returns:
+        删除统计信息
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="请确认删除操作：需要设置 confirm=true"
+        )
+    
+    try:
+        result = neo4j_client.delete_all_concepts()
+        return {
+            "message": "所有概念节点已删除",
+            "deleted_concepts": result["deleted_concepts"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+@router.delete("/purge/documents")
+async def purge_all_documents(
+    confirm: bool = Query(False, description="Confirm deletion (must be true)")
+):
+    """
+    清空所有文档节点（Document）
+    
+    删除所有 Document 节点及其相关关系。
+    
+    Args:
+        confirm: 必须设置为 true
+    
+    Returns:
+        删除统计信息
+    """
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="请确认删除操作：需要设置 confirm=true"
+        )
+    
+    try:
+        result = neo4j_client.delete_all_documents()
+        return {
+            "message": "所有文档节点已删除",
+            "deleted_documents": result["deleted_documents"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")

@@ -18,7 +18,7 @@ sys.path.insert(0, str(project_root))
 import pytest
 from unittest.mock import Mock, patch
 
-from graphrag.prompts.stages.stage4_theme_builder import ThemeBuilder
+from graphrag.stages.stage4_theme_builder import ThemeBuilder
 from graphrag.models.theme import Theme
 
 # 配置日志
@@ -254,7 +254,7 @@ def _install_test_mocks(monkeypatch, custom_theme_response=None):
                 "base_url": ""
             }
     
-    from graphrag.prompts.stages import stage4_theme_builder as s4
+    from graphrag.stages import stage4_theme_builder as s4
     monkeypatch.setattr(s4, "config_service", _ConfigService, raising=True)
     
     # Mock AIProviderFactory 返回自定义 Mock 客户端
@@ -264,7 +264,7 @@ def _install_test_mocks(monkeypatch, custom_theme_response=None):
         return custom_client
     
     monkeypatch.setattr(
-        "graphrag.prompts.stages.stage4_theme_builder.AIProviderFactory.create_client",
+        "graphrag.stages.stage4_theme_builder.AIProviderFactory.create_client",
         _create_mock_client,
         raising=True
     )
@@ -463,7 +463,7 @@ def test_theme_building_multi_scale(monkeypatch):
     _install_test_mocks(monkeypatch)
     
     # 修改配置以启用多尺度检测
-    from graphrag.prompts.stages import stage4_theme_builder as s4
+    from graphrag.stages import stage4_theme_builder as s4
     
     class _MockConfigMultiScale:
         def __init__(self):

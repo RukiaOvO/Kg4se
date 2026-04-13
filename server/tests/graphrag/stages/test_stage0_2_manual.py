@@ -32,7 +32,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from graphrag.prompts.stages import SemanticChunker, CoreferenceResolver, EntityLinker  # type: ignore
+from graphrag.stages import SemanticChunker, CoreferenceResolver, EntityLinker  # type: ignore
 from graphrag.models.chunk import ChunkMetadata  # type: ignore
 from services.config_service import config_service  # type: ignore
 

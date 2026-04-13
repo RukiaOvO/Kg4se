@@ -8,7 +8,7 @@ load_dotenv()
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import upload, ingest, graph, settings, knowledge_card, qa
+from routes import upload, ingest, graph, settings, knowledge_card, qa, evaluation
 from infra.neo4j_client import neo4j_client
 
 
@@ -55,6 +55,7 @@ app.include_router(graph.router)
 app.include_router(settings.router)
 app.include_router(knowledge_card.router)
 app.include_router(qa.router)
+app.include_router(evaluation.router)
 
 
 @app.get("/")

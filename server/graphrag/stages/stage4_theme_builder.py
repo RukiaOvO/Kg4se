@@ -18,6 +18,7 @@ from graphrag.config import get_config
 from infra.ai_providers import AIProviderFactory, BaseAIClient
 from services.config_service import config_service
 from graphrag.utils.embedding import cosine_similarity
+from prompts import PromptManager
 
 logger = logging.getLogger("graphrag.stage4")
 
@@ -1289,13 +1290,12 @@ class ThemeBuilder:
         
         logger.info(f"批量生成主题摘要: {len(theme_data_list)} 个主题，批次大小={batch_size}")
         
-        # 加载 Prompt 模板
-        prompt_template_path = Path(__file__).parent.parent / "prompts" / "theme_summary.txt"
-        try:
-            with open(prompt_template_path, "r", encoding="utf-8") as f:
-                prompt_template = f.read()
-        except Exception as e:
-            logger.error(f"无法加载 Prompt 模板: {e}")
+        # 使用统一的 PromptManager 加载 Prompt 模板
+        prompt_manager = PromptManager()
+        prompt_template = prompt_manager.get("graphrag", "theme_summary")
+        
+        if not prompt_template:
+            logger.error("无法加载 Prompt 模板")
             return {
                 theme_data["community_id"]: self._default_theme_summary(
                     community_contents.get(theme_data["community_id"], {}).get("concepts", []),
@@ -1456,13 +1456,12 @@ class ThemeBuilder:
             logger.warning("AI 客户端未初始化，使用默认主题摘要")
             return self._default_theme_summary(concepts, claims)
         
-        # 加载 Prompt 模板
-        prompt_template_path = Path(__file__).parent.parent / "prompts" / "theme_summary.txt"
-        try:
-            with open(prompt_template_path, "r", encoding="utf-8") as f:
-                prompt_template = f.read()
-        except Exception as e:
-            logger.error(f"无法加载 Prompt 模板: {e}")
+        # 使用统一的 PromptManager 加载 Prompt 模板
+        prompt_manager = PromptManager()
+        prompt_template = prompt_manager.get("graphrag", "theme_summary")
+        
+        if not prompt_template:
+            logger.error("无法加载 Prompt 模板")
             return self._default_theme_summary(concepts, claims)
         
         # 格式化 Prompt

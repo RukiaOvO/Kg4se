@@ -1,0 +1,51 @@
+You are a professional knowledge graph construction expert. Extract structured knowledge triplets from the given source code.
+你是一位专业的知识图谱构建专家。请从以下源代码中提取结构化的知识三元组。
+
+**Code Content / 代码内容：**
+{text}
+
+**Code Metadata / 代码元数据：**
+- Language: {language}
+- Page: {page}
+
+**Task Requirements / 任务要求：**
+1. Analyze the code structure to identify classes, functions, and variables
+2. Extract relationships between code elements
+3. Identify design patterns, algorithms, and data structures used
+4. Extract the purpose and functionality of the code
+5. **Preserve original language and code syntax**
+
+**Relationship Types Guide / 关系类型指南：**
+- `is_a` / `定义为`: A is a type/kind of B
+- `contains` / `包含`: A contains B as a component
+- `belongs_to` / `属于`: A belongs to category B
+- `has_property` / `具有属性`: A has characteristic or attribute
+- `used_for` / `用于`: A is used to achieve/accomplish B
+- `affects` / `影响`: A affects B
+- `relates_to` / `关联`: A is related to B
+- `composed_of` / `由...组成`: A is composed of B
+- `produces` / `产生`: A produces/generates B
+- `depends_on` / `依赖`: A depends on B
+- `causes` / `导致`: A causes B
+- `implements` / `实现`: A implements B
+- `derived_from` / `派生自`: A is derived from B
+- `similar_to` / `相似于`: A is similar to B
+
+**Output Format (Pure JSON) / 输出格式（纯 JSON）：**
+{{
+  "triplets": [
+    {{
+      "subject": "Code Element Name",
+      "predicate": "Relationship Type (use types from guide above)",
+      "object": "Related Element/Concept",
+      "confidence": 0.85,
+      "language": "zh" or "en" or "mixed"
+    }}
+  ]
+}}
+
+**Important Notes / 注意事项：**
+- Use only relationship types from the guide above
+- Extract technical relationships accurately
+- Preserve code identifiers in subject/object
+- Return ONLY the JSON object, no other text.

@@ -1,0 +1,51 @@
+You are a professional knowledge graph construction expert. Extract structured knowledge triplets from the given mathematical equation.
+你是一位专业的知识图谱构建专家。请从以下数学公式中提取结构化的知识三元组。
+
+**Equation / 公式：**
+{text}
+
+**Equation Metadata / 公式元数据：**
+- LaTeX: {latex}
+- Page: {page}
+
+**Task Requirements / 任务要求：**
+1. Parse the mathematical formula to identify variables, constants, and operators
+2. Extract semantic relationships between mathematical entities
+3. Identify the physical meaning or domain of the formula
+4. Extract definitions and relationships between mathematical concepts
+5. **Preserve original language and mathematical notation**
+
+**Relationship Types Guide / 关系类型指南：**
+- `is_a` / `定义为`: A is a type/kind of B
+- `contains` / `包含`: A contains B as a component
+- `belongs_to` / `属于`: A belongs to category B
+- `has_property` / `具有属性`: A has characteristic or attribute
+- `used_for` / `用于`: A is used to achieve/accomplish B
+- `affects` / `影响`: A affects B
+- `relates_to` / `关联`: A is related to B
+- `composed_of` / `由...组成`: A is composed of B
+- `produces` / `产生`: A produces/generates B
+- `depends_on` / `依赖`: A depends on B
+- `causes` / `导致`: A causes B
+- `implements` / `实现`: A implements B
+- `derived_from` / `派生自`: A is derived from B
+- `similar_to` / `相似于`: A is similar to B
+
+**Output Format (Pure JSON) / 输出格式（纯 JSON）：**
+{{
+  "triplets": [
+    {{
+      "subject": "Variable/Concept Name",
+      "predicate": "Relationship Type (use types from guide above)",
+      "object": "Target Concept/Value",
+      "confidence": 0.85,
+      "language": "zh" or "en" or "mixed"
+    }}
+  ]
+}}
+
+**Important Notes / 注意事项：**
+- Use only relationship types from the guide above
+- Extract mathematical relationships accurately
+- Preserve mathematical notation in subject/object
+- Return ONLY the JSON object, no other text.

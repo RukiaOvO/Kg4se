@@ -14,7 +14,7 @@ from pathlib import Path
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from graphrag.prompts.stages.stage0_chunker import SemanticChunker
+from graphrag.stages.stage0_chunker import SemanticChunker
 from graphrag.models.chunk import ChunkMetadata
 from graphrag.utils.text_processing import split_sentences, sliding_window
 

@@ -1,7 +1,7 @@
 import json
 import pytest
 
-from graphrag.prompts.stages import stage4_theme_builder as s4
+from graphrag.stages import stage4_theme_builder as s4
 from graphrag.models.theme import Theme
 
 

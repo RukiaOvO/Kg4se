@@ -18,6 +18,7 @@ from infra.ai_providers import AIProviderFactory
 from graphrag.utils.evidence_aligner import align_evidence
 from graphrag.utils.claim_deduplicator import deduplicate_claims, compute_text_hash
 from graphrag.utils.nli_verifier import NLIVerifier
+from prompts import PromptManager
 
 logger = logging.getLogger("graphrag.stage3")
 
@@ -33,12 +34,12 @@ class ClaimExtractor:
         self.config = get_config()
         self.client = None
         
-        # 加载 Prompt 模板
-        prompt_path = Path(__file__).parent.parent / "prompts" / "claim_extraction.txt"
-        if prompt_path.exists():
-            with open(prompt_path, "r", encoding="utf-8") as f:
-                self.prompt_template = f.read()
-        else:
+        # 使用统一的 PromptManager 加载 Prompt 模板
+        prompt_manager = PromptManager()
+        self.prompt_template = prompt_manager.get("graphrag", "claim_extraction")
+        
+        # 如果没有找到，使用默认 Prompt（向后兼容）
+        if not self.prompt_template:
             self.prompt_template = self._default_prompt()
         
         # 初始化 AI 客户端

@@ -406,3 +406,81 @@ export const askQuestion = (request: AskRequest): Promise<AskResponse> =>
 export const checkQAHealth = (): Promise<{ status: string; provider: string; has_ai_client: boolean }> =>
   api.get('/qa/health')
 
+// ========== Evaluation Service ==========
+
+export interface GraphQualityResult {
+  structural_quality: {
+    node_count: number
+    edge_count: number
+    avg_degree: number
+    modularity: number
+    density: number
+    connected_components: number
+  }
+  content_quality: {
+    sample_size: number
+    valid_ratio: number
+    avg_confidence: number
+    predicate_diversity: number
+    predicate_normalized_ratio: number
+  }
+  construction_efficiency: {
+    documents_processed: number
+    total_build_time: number
+    tokens_consumed: number
+    throughput: number
+  }
+  overall_score: number
+  recommendations: string[]
+}
+
+export interface AnswerEvaluationResult {
+  success: boolean
+  question: string
+  graphrag_answer: string
+  rag_answer: string
+  llm_answer: string
+  evaluation: {
+    graphrag: {
+      automatic: {
+        semantic_similarity: number
+        word_overlap: number
+      }
+      overall_score: number
+    }
+    rag: {
+      automatic: {
+        semantic_similarity: number
+        word_overlap: number
+      }
+      overall_score: number
+    }
+    llm: {
+      automatic: {
+        semantic_similarity: number
+        word_overlap: number
+      }
+      overall_score: number
+    }
+    statistics: {
+      graphrag_score: number
+      rag_score: number
+      llm_score: number
+    }
+  }
+  improvement: {
+    graphrag_over_rag_percent: number
+    graphrag_over_llm_percent: number
+    rag_over_llm_percent: number
+  }
+}
+
+export const evaluateGraphQuality = (): Promise<GraphQualityResult> =>
+  api.get('/evaluation/graph')
+
+export const evaluateAnswerQuality = (question: string, expectedAnswer?: string): Promise<AnswerEvaluationResult> =>
+  api.post('/evaluation/answer', {
+    question,
+    expected_answer: expectedAnswer
+  })
+

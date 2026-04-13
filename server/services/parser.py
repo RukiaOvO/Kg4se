@@ -32,15 +32,28 @@ class BaiduOCRClient:
         api_key = os.environ.get('BAIDU_OCR_API_KEY', '')
         secret_key = os.environ.get('BAIDU_OCR_SECRET_KEY', '')
 
-        if not app_id or not api_key or not secret_key:
+        # 检查配置完整性（不打印密钥内容）
+        has_app_id = bool(app_id)
+        has_api_key = bool(api_key)
+        has_secret_key = bool(secret_key)
+        
+        if not has_app_id or not has_api_key or not has_secret_key:
             print("[百度OCR] 未配置 API 密钥，OCR 功能将被禁用")
+            print(f"[百度OCR] 配置检查: APP_ID: {'✅' if has_app_id else '❌'}, API_KEY: {'✅' if has_api_key else '❌'}, SECRET_KEY: {'✅' if has_secret_key else '❌'}")
             return
         
         try:
             self.client = AipOcr(app_id, api_key, secret_key)
             print("[百度OCR] 客户端初始化成功")
         except Exception as e:
-            print(f"[百度OCR] 初始化失败: {e}")
+            # 隐藏异常详情中的敏感信息
+            error_msg = str(e)
+            # 替换可能泄露的密钥信息
+            if api_key and api_key in error_msg:
+                error_msg = error_msg.replace(api_key, "***")
+            if secret_key and secret_key in error_msg:
+                error_msg = error_msg.replace(secret_key, "***")
+            print(f"[百度OCR] 初始化失败: {error_msg}")
     
     def recognize(self, image_bytes: bytes) -> str:
         """
@@ -318,11 +331,21 @@ class PDFParser(Parser):
         return self._parse_with_pymupdf(file_path)
 
     def _parse_with_docling(self, file_path: str) -> tuple[str, List[Chunk]]:
-        """使用 Docling 解析 PDF"""
+        """
+        使用 Docling 解析 PDF（支持多模态内容）
+        
+        Args:
+            file_path: PDF 文件路径
+        
+        Returns:
+            (full_text, chunks) 元组
+        """
         from docling.document_converter import DocumentConverter
         from docling.datamodel.document import Document
+        from docling.datamodel.elements import Table, Figure, TextBlock, Equation, CodeBlock
         
-        print(f"[Docling] 开始解析: {file_path}")
+        print(f"\n{'='*80}")
+        print(f"🔍 [Docling] 开始解析多模态文档: {file_path}")
         
         converter = DocumentConverter()
         result: Document = converter.convert(file_path)
@@ -333,70 +356,249 @@ class PDFParser(Parser):
         
         for element in result.elements:
             element_type = type(element).__name__
+            page_num = getattr(element, 'page_num', 1)
             
-            if hasattr(element, 'content') and element.content:
-                text = element.content.strip()
-                if text:
+            if isinstance(element, TextBlock):
+                # 文本块处理
+                text = getattr(element, 'content', '').strip()
+                if text and len(text) >= 10:
                     full_text += text + "\n\n"
-                    
                     chunk = Chunk(
                         doc_id=doc_id,
-                        chunk_id=f"c_{len(chunks)}",
+                        chunk_id=f"text_{len(chunks)}",
                         text=text,
                         meta={
-                            "type": element_type.lower(),
-                            "page": getattr(element, 'page_num', 1),
-                            "source": "docling"
+                            "type": "text",
+                            "page": page_num,
+                            "source": "docling",
+                            "element_type": element_type
                         }
                     )
                     chunks.append(chunk)
+                    print(f"📝 [Docling] 提取文本块: page={page_num}, length={len(text)}")
+            
+            elif isinstance(element, Table):
+                # 表格处理 → 转换为 Markdown 格式
+                table_md = self._table_to_markdown(element)
+                if table_md:
+                    full_text += table_md + "\n\n"
+                    chunk = Chunk(
+                        doc_id=doc_id,
+                        chunk_id=f"table_{len(chunks)}",
+                        text=table_md,
+                        meta={
+                            "type": "table",
+                            "page": page_num,
+                            "source": "docling",
+                            "element_type": element_type,
+                            "rows": len(element.rows) if hasattr(element, 'rows') else 0,
+                            "cols": self._count_table_cols(element)
+                        }
+                    )
+                    chunks.append(chunk)
+                    print(f"📊 [Docling] 提取表格: page={page_num}, rows={chunk.meta['rows']}, cols={chunk.meta['cols']}")
+            
+            elif isinstance(element, Figure):
+                # 图表处理 → 提取标题和描述
+                caption = getattr(element, 'caption', '') or ''
+                description = getattr(element, 'description', '') or ''
+                fig_type = getattr(element, 'figure_type', 'unknown')
+                
+                # 构建图表描述文本
+                fig_text = self._build_figure_text(caption, description, fig_type)
+                if fig_text:
+                    full_text += fig_text + "\n\n"
+                    chunk = Chunk(
+                        doc_id=doc_id,
+                        chunk_id=f"figure_{len(chunks)}",
+                        text=fig_text,
+                        meta={
+                            "type": "figure",
+                            "page": page_num,
+                            "source": "docling",
+                            "element_type": element_type,
+                            "figure_type": fig_type,
+                            "caption": caption,
+                            "description": description
+                        }
+                    )
+                    chunks.append(chunk)
+                    print(f"🖼️ [Docling] 提取图表: page={page_num}, type={fig_type}")
+            
+            elif isinstance(element, Equation):
+                # 公式处理 → LaTeX 格式
+                latex = getattr(element, 'latex', '') or str(element)
+                if latex and len(latex) >= 5:
+                    full_text += f"$$ {latex} $$\n\n"
+                    chunk = Chunk(
+                        doc_id=doc_id,
+                        chunk_id=f"equation_{len(chunks)}",
+                        text=f"$$ {latex} $$",
+                        meta={
+                            "type": "equation",
+                            "page": page_num,
+                            "source": "docling",
+                            "element_type": element_type,
+                            "latex": latex
+                        }
+                    )
+                    chunks.append(chunk)
+                    print(f"∑ [Docling] 提取公式: page={page_num}, length={len(latex)}")
+            
+            elif isinstance(element, CodeBlock):
+                # 代码块处理
+                code_text = getattr(element, 'content', '') or ''
+                language = getattr(element, 'language', 'unknown')
+                if code_text and len(code_text) >= 10:
+                    full_text += f"```\n{code_text}\n```\n\n"
+                    chunk = Chunk(
+                        doc_id=doc_id,
+                        chunk_id=f"code_{len(chunks)}",
+                        text=f"```\n{code_text}\n```",
+                        meta={
+                            "type": "code",
+                            "page": page_num,
+                            "source": "docling",
+                            "element_type": element_type,
+                            "language": language
+                        }
+                    )
+                    chunks.append(chunk)
+                    print(f"💻 [Docling] 提取代码块: page={page_num}, language={language}")
         
-        print(f"[Docling] 解析完成: {len(chunks)} 个文本块")
+        print(f"✅ [Docling] 解析完成: 共 {len(chunks)} 个多模态块")
+        print(f"{'='*80}\n")
+        
         return full_text, chunks
+    
+    def _table_to_markdown(self, table) -> str:
+        """
+        将 Docling Table 元素转换为 Markdown 表格
+        
+        Args:
+            table: Docling Table 元素
+        
+        Returns:
+            Markdown 格式的表格字符串
+        """
+        if not table:
+            return ""
+        
+        try:
+            rows = getattr(table, 'rows', [])
+            if not rows:
+                return ""
+            
+            md_lines = []
+            
+            # 处理表头
+            header = getattr(table, 'header', None)
+            if header and hasattr(header, 'cells'):
+                headers = []
+                for cell in header.cells:
+                    cell_text = getattr(cell, 'content', '').strip() or '---'
+                    headers.append(cell_text)
+                md_lines.append(f"| {' | '.join(headers)} |")
+                md_lines.append(f"| {' | '.join(['---'] * len(headers))} |")
+            
+            # 处理表格行
+            for row in rows:
+                if hasattr(row, 'cells'):
+                    cells = []
+                    for cell in row.cells:
+                        cell_text = getattr(cell, 'content', '').strip() or ''
+                        # 处理换行符
+                        cell_text = cell_text.replace('\n', ' ')
+                        cells.append(cell_text)
+                    md_lines.append(f"| {' | '.join(cells)} |")
+            
+            return '\n'.join(md_lines)
+        
+        except Exception as e:
+            print(f"⚠️ [Docling] 表格转换失败: {e}")
+            return ""
+    
+    def _count_table_cols(self, table) -> int:
+        """计算表格列数"""
+        try:
+            if hasattr(table, 'columns') and table.columns:
+                return len(table.columns)
+            if hasattr(table, 'rows') and table.rows:
+                first_row = table.rows[0]
+                if hasattr(first_row, 'cells'):
+                    return len(first_row.cells)
+        except Exception:
+            pass
+        return 0
+    
+    def _build_figure_text(self, caption: str, description: str, fig_type: str) -> str:
+        """
+        构建图表描述文本
+        
+        Args:
+            caption: 图表标题
+            description: 图表描述
+            fig_type: 图表类型
+        
+        Returns:
+            结构化的图表描述文本
+        """
+        parts = []
+        
+        if fig_type:
+            parts.append(f"图表类型: {fig_type}")
+        if caption:
+            parts.append(f"图表标题: {caption}")
+        if description:
+            parts.append(f"图表描述: {description}")
+        
+        if parts:
+            return "\n".join(parts)
+        return ""
 
     def _parse_with_pymupdf(self, file_path: str) -> tuple[str, List[Chunk]]:
         """使用 PyMuPDF 解析 PDF（回退方案）"""
-        doc = fitz.open(file_path)
         chunks = []
         full_text_parts = []
         doc_id = Path(file_path).stem
         
-        for page_num in range(len(doc)):
-            page = doc[page_num]
+        # 使用 with 语句确保文档正确关闭
+        with fitz.open(file_path) as doc:
+            for page_num in range(len(doc)):
+                page = doc[page_num]
 
-            # 1. 首先尝试提取嵌入文本
-            text = page.get_text()
+                # 1. 首先尝试提取嵌入文本
+                text = page.get_text()
 
-            # 2. 如果文本很少或为空，尝试 OCR
-            if self.use_ocr and (not text.strip() or len(text.strip()) < 50):
-                ocr_text = self._extract_text_with_ocr(page)
-                if ocr_text and len(ocr_text) > len(text):
-                    text = ocr_text
-                    print(f"[OCR] 页面 {page_num + 1} 使用百度 OCR 提取")
-            
-            # 3. 如果仍然没有文本，跳过该页面
-            if not text.strip():
-                print(f"[PDF解析] 页面 {page_num + 1} 无有效文本")
-                continue
-            
-            full_text_parts.append(text)
-            
-            # Use smart chunking with page-aware metadata
-            page_chunks = self._smart_chunk(
-                text=text,
-                doc_id=doc_id,
-                base_chunk_id=f"c_{page_num}",
-                meta={
-                    "page": page_num + 1,
-                    "section": None,
-                    "offset": [0, len(text)],
-                    "ocr_used": self.use_ocr and (len(page.get_text()) < 50),
-                    "source": "pymupdf"
-                }
-            )
-            chunks.extend(page_chunks)
+                # 2. 如果文本很少或为空，尝试 OCR
+                if self.use_ocr and (not text.strip() or len(text.strip()) < 50):
+                    ocr_text = self._extract_text_with_ocr(page)
+                    if ocr_text and len(ocr_text) > len(text):
+                        text = ocr_text
+                        print(f"[OCR] 页面 {page_num + 1} 使用百度 OCR 提取")
+                
+                # 3. 如果仍然没有文本，跳过该页面
+                if not text.strip():
+                    print(f"[PDF解析] 页面 {page_num + 1} 无有效文本")
+                    continue
+                
+                full_text_parts.append(text)
+                
+                # Use smart chunking with page-aware metadata
+                page_chunks = self._smart_chunk(
+                    text=text,
+                    doc_id=doc_id,
+                    base_chunk_id=f"c_{page_num}",
+                    meta={
+                        "page": page_num + 1,
+                        "section": None,
+                        "offset": [0, len(text)],
+                        "ocr_used": self.use_ocr and (len(page.get_text()) < 50),
+                        "source": "pymupdf"
+                    }
+                )
+                chunks.extend(page_chunks)
         
-        doc.close()
         full_text = "\n\n".join(full_text_parts)
         return full_text, chunks
 
