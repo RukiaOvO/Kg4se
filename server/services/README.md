@@ -6,24 +6,50 @@ POW_SE 后端业务逻辑服务模块,提供文档处理、知识抽取、图谱
 
 ### 1. **parser.py** - 文档解析服务
 
-解析多种格式的文档文件。
+解析多种格式的文档文件，支持多模态内容提取。
 
-**支持格式**: PDF, TXT, DOCX, MD
+**支持格式**: PDF, TXT, DOCX, MD, 扫描件PDF(OCR)
 
 **核心类**:
 ```python
 from services.parser import DocumentParser
 
-parser = DocumentParser()
+# 初始化解析器（支持OCR配置）
+parser = DocumentParser(use_ocr=True)
+
+# 解析文档（自动选择最佳解析方案）
 text = parser.parse_file("document.pdf")
 metadata = parser.extract_metadata("document.pdf")
+
+# 获取解析详情
+result = parser.parse_with_details("document.pdf")
+print(f"使用方案: {result['method']}")
+print(f"文本内容: {result['content']}")
 ```
 
 **功能**:
-- PDF 文本提取(包含 OCR)
+- PDF 文本提取（Docling优先，PyMuPDF回退）
+- 扫描件PDF OCR识别（集成百度OCR API）
 - Word 文档解析
 - Markdown 解析
 - 元数据提取(作者、创建日期等)
+- 表格、图表、公式提取（Docling支持）
+
+**解析策略**:
+| 文档类型 | 首选方案 | 回退方案 |
+|----------|----------|----------|
+| 可复制PDF | Docling | PyMuPDF |
+| 扫描件PDF | 百度OCR | - |
+| DOCX | python-docx | - |
+| TXT/MD | 直接读取 | - |
+
+**OCR配置**:
+```python
+# 在.env文件中配置百度OCR
+BAIDU_OCR_APP_ID=your_app_id
+BAIDU_OCR_API_KEY=your_api_key
+BAIDU_OCR_SECRET_KEY=your_secret_key
+```
 
 ---
 

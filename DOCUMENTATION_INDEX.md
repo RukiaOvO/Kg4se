@@ -15,13 +15,19 @@ POW/
 │   ├── models/                # 数据模型
 │   ├── services/              # 业务服务
 │   ├── routes/                # API路由
-│   ├── graphrag/              # 知识图谱RAG
+│   ├── graphrag/              # 知识图谱RAG (8阶段流水线)
+│   │   └── stages/            # 各阶段实现
+│   ├── prompts/               # Prompt管理 (集中管理)
+│   ├── evaluation/            # 评估模块 (新增)
+│   │   ├── graph_quality.py   # 图谱质量评估
+│   │   └── answer_quality.py  # 回答质量评估
 │   └── tests/                 # 测试套件
 │
 ├── app/vue/                   # 前端应用 (Vue 3 + TypeScript)
 │   └── src/
 │       ├── api/              # API服务层
 │       ├── views/            # 页面组件
+│       │   └── Evaluation.vue # 质量分析页面(新增)
 │       ├── components/       # 通用组件
 │       ├── stores/           # 状态管理
 │       └── router/           # 路由配置
@@ -116,6 +122,9 @@ POW/
 - `/api/qa`: 智能问答API
 - `/api/knowledge`: 知识卡片API
 - `/api/settings`: 系统设置API
+- `/api/evaluation`: 质量评估API (新增)
+  - `/evaluation/graph`: 图谱质量分析
+  - `/evaluation/answer`: 回答质量对比评估
 
 ---
 
@@ -176,6 +185,9 @@ POW/
 - `Query.vue`: 智能问答（对话界面）
 - `KnowledgeCard.vue`: 知识卡片（概念浏览）
 - `Settings.vue`: 系统设置（AI配置）
+- `Evaluation.vue`: 质量分析页面（新增）
+  - 知识图谱质量分析：结构质量、内容质量、构建效率
+  - LLM回答质量对比：GraphRAG vs RAG vs LLM
 
 **技术亮点**:
 - ✅ Cytoscape.js图可视化（5种布局算法）

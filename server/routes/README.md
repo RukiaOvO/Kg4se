@@ -30,6 +30,7 @@ POW_SE 后端 API 路由模块,提供 RESTful API 接口。
 | `/graph` | graph.py | 图谱查询和可视化 |
 | `/qa` | qa.py | 智能问答 |
 | `/knowledge-cards` | knowledge_card.py | 知识卡片管理 |
+| `/evaluation` | evaluation.py | 质量评估（图谱质量、回答质量） |
 | `/settings` | settings.py | 系统设置 |
 
 ## 📦 路由模块
@@ -528,7 +529,116 @@ file: <文件数据>
 
 ---
 
-### 6. Settings Routes (`settings.py`)
+### 6. Evaluation Routes (`evaluation.py`)
+
+**质量评估API**
+
+#### `GET /evaluation/graph`
+
+获取知识图谱质量评估结果
+
+**响应**:
+```json
+{
+  "structural_quality": {
+    "node_count": 1234,
+    "edge_count": 3456,
+    "avg_degree": 5.6,
+    "connected_components": 1,
+    "modularity": 0.5,
+    "density": 0.035
+  },
+  "content_quality": {
+    "sample_size": 100,
+    "valid_ratio": 0.95,
+    "avg_confidence": 0.88,
+    "predicate_diversity": 15,
+    "predicate_normalized_ratio": 0.85
+  },
+  "construction_efficiency": {
+    "documents_processed": 50,
+    "total_build_time": 3600,
+    "tokens_consumed": 500000,
+    "throughput": 0.014
+  },
+  "overall_score": 0.85,
+  "recommendations": ["建议增加更多文档以提升覆盖率", "部分谓词需要规范化"]
+}
+```
+
+#### `POST /evaluation/answer`
+
+对比评估GraphRAG、RAG、LLM三种回答方式
+
+**请求体**:
+```json
+{
+  "question": "什么是软件工程?",
+  "expected_answer": "软件工程是一门系统化、规范化、可量化的软件开发方法..."
+}
+```
+
+**响应**:
+```json
+{
+  "question": "什么是软件工程?",
+  "expected_answer": "...",
+  "results": {
+    "graphrag": {
+      "answer": "...",
+      "score": {
+        "accuracy": 4.5,
+        "completeness": 4.2,
+        "relevance": 4.8,
+        "overall": 4.5
+      }
+    },
+    "rag": {
+      "answer": "...",
+      "score": {
+        "accuracy": 3.8,
+        "completeness": 3.5,
+        "relevance": 4.0,
+        "overall": 3.8
+      }
+    },
+    "llm": {
+      "answer": "...",
+      "score": {
+        "accuracy": 3.2,
+        "completeness": 3.0,
+        "relevance": 3.5,
+        "overall": 3.2
+      }
+    }
+  },
+  "comparison": {
+    "graphrag_vs_rag_improvement": 18.4,
+    "graphrag_vs_llm_improvement": 40.6,
+    "best_method": "graphrag"
+  }
+}
+```
+
+#### `GET /evaluation/health`
+
+评估服务健康检查
+
+**响应**:
+```json
+{
+  "status": "healthy",
+  "services": {
+    "neo4j": "connected",
+    "ai": "available",
+    "evaluation": "ready"
+  }
+}
+```
+
+---
+
+### 7. Settings Routes (`settings.py`)
 
 **系统设置**
 
