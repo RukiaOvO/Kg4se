@@ -13,81 +13,50 @@ from utils.logger import get_logger
 
 logger = get_logger("services.parser")
 
-# 百度 OCR
 try:
-    from aip import AipOcr
-    BAIDU_OCR_AVAILABLE = True
+    from rapidocr_onnxruntime import RapidOCR
+    RAPID_OCR_AVAILABLE = True
 except ImportError:
-    BAIDU_OCR_AVAILABLE = False
+    RAPID_OCR_AVAILABLE = False
 
 
-class BaiduOCRClient:
-    """百度 OCR API 客户端"""
-    
+class RapidOCRClient:
     def __init__(self):
-        self.client = None
+        self.engine = None
         self._initialize()
     
     def _initialize(self):
-        """初始化百度 OCR 客户端"""
-        if not BAIDU_OCR_AVAILABLE:
-            logger.warning("[BaiduOCR] Library not installed, OCR functionality disabled")
-            return
-        
-        app_id = os.environ.get('BAIDU_OCR_APP_ID', '')
-        api_key = os.environ.get('BAIDU_OCR_API_KEY', '')
-        secret_key = os.environ.get('BAIDU_OCR_SECRET_KEY', '')
-
-        has_app_id = bool(app_id)
-        has_api_key = bool(api_key)
-        has_secret_key = bool(secret_key)
-        
-        if not has_app_id or not has_api_key or not has_secret_key:
-            logger.warning("[BaiduOCR] API keys not configured, OCR functionality disabled")
-            logger.debug(f"[BaiduOCR] Config check: APP_ID: {'✅' if has_app_id else '❌'}, API_KEY: {'✅' if has_api_key else '❌'}, SECRET_KEY: {'✅' if has_secret_key else '❌'}")
+        if not RAPID_OCR_AVAILABLE:
+            logger.warning("[RapidOCR] Library not installed, OCR functionality disabled")
             return
         
         try:
-            self.client = AipOcr(app_id, api_key, secret_key)
-            logger.info("[BaiduOCR] Client initialized successfully")
+            self.engine = RapidOCR()
+            logger.info("[RapidOCR] Engine initialized successfully")
         except Exception as e:
-            error_msg = str(e)
-            if api_key and api_key in error_msg:
-                error_msg = error_msg.replace(api_key, "***")
-            if secret_key and secret_key in error_msg:
-                error_msg = error_msg.replace(secret_key, "***")
-            logger.error(f"[BaiduOCR] Initialization failed: {error_msg}")
+            logger.error(f"[RapidOCR] Initialization failed: {e}")
     
     def recognize(self, image_bytes: bytes) -> str:
-        """
-        使用百度 OCR 识别图片文字
-        
-        Args:
-            image_bytes: 图片字节数据
-        
-        Returns:
-            识别出的文本
-        """
-        if not self.client:
+        if not self.engine:
             return ""
         
         try:
-            result = self.client.basicAccurate(image_bytes)
+            result, _ = self.engine(image_bytes)
             
-            if 'words_result' not in result:
-                logger.error(f"[BaiduOCR] Recognition failed: {result.get('error_msg', 'Unknown error')}")
+            if not result:
+                logger.debug("[RapidOCR] No text detected")
                 return ""
             
-            text = "\n".join(item['words'] for item in result['words_result'])
-            logger.debug(f"[BaiduOCR] Recognition successful, text length: {len(text)}")
+            text = "\n".join(item[1] for item in result)
+            logger.debug(f"[RapidOCR] Recognition successful, text length: {len(text)}")
             return text
         
         except Exception as e:
-            logger.error(f"[BaiduOCR] Recognition error: {e}")
+            logger.error(f"[RapidOCR] Recognition error: {e}")
             return ""
 
 
-baidu_ocr_client = BaiduOCRClient()
+rapid_ocr_client = RapidOCRClient()
 
 
 class Parser:
@@ -280,7 +249,7 @@ class Parser:
 
 
 class PDFParser(Parser):
-    """PDF parser using Docling with fallback to PyMuPDF + Baidu OCR."""
+    """PDF parser using Docling with fallback to PyMuPDF + RapidOCR."""
     
     _docling_converter = None
     _docling_initialized = False
@@ -295,7 +264,7 @@ class PDFParser(Parser):
             timeout: Maximum parsing time in seconds (default: 300)
         """
         super().__init__(chunk_size=chunk_size)
-        self.use_ocr = BAIDU_OCR_AVAILABLE and baidu_ocr_client.client
+        self.use_ocr = RAPID_OCR_AVAILABLE and rapid_ocr_client.engine
         self._docling_available = self._check_docling()
         self._timeout = timeout
         self._parse_metrics = {}
@@ -304,15 +273,19 @@ class PDFParser(Parser):
             self._initialize_docling()
     
     def _check_docling(self) -> bool:
-        """检查 Docling 是否可用"""
+        """检查 Docling 是否可用（包括网络连接）"""
         try:
             from docling.document_converter import DocumentConverter
+            # 尝试初始化转换器（会下载模型）
+            if not PDFParser._docling_converter:
+                PDFParser._docling_converter = DocumentConverter()
+                logger.info("[Docling] Library available and initialized")
             return True
         except ImportError:
             logger.warning("[Docling] Library not installed")
             return False
         except Exception as e:
-            logger.warning(f"[Docling] Failed to check availability: {e}")
+            logger.warning(f"[Docling] Initialization failed (network or model download issue): {e}")
             return False
     
     def _initialize_docling(self):
@@ -649,7 +622,7 @@ class PDFParser(Parser):
                     ocr_text = self._extract_text_with_ocr(page)
                     if ocr_text and len(ocr_text) > len(text):
                         text = ocr_text
-                        logger.debug(f"[OCR] Page {page_num + 1} extracted using Baidu OCR")
+                        logger.debug(f"[OCR] Page {page_num + 1} extracted using RapidOCR")
                 
                 if not text.strip():
                     logger.debug(f"[PDF Parsing] Page {page_num + 1} has no valid text")
@@ -675,7 +648,7 @@ class PDFParser(Parser):
         return full_text, chunks
     
     def _extract_text_with_ocr(self, page) -> str:
-        """Extract text from page images using Baidu OCR."""
+        """Extract text from page images using RapidOCR."""
         if not self.use_ocr:
             return ""
         
@@ -693,7 +666,7 @@ class PDFParser(Parser):
                     continue
                 
                 img_bytes = base_image["image"]
-                text = baidu_ocr_client.recognize(img_bytes)
+                text = rapid_ocr_client.recognize(img_bytes)
                 if text.strip():
                     ocr_text.append(text.strip())
             
