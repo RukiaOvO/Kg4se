@@ -3,6 +3,9 @@ from typing import List, Dict, Optional, Set
 from models.document import Triplet
 from infra.neo4j_client import neo4j_client
 import re
+from utils.logger import get_logger
+
+logger = get_logger("services.linker")
 
 
 class EntityLinker:
@@ -24,8 +27,8 @@ class EntityLinker:
         Returns:
             List of triplets with linked entities
         """
-        print(f"\n{'='*80}")
-        print(f"🔗 [实体链接] 开始处理 {len(triplets)} 个三元组")
+        logger.info(f"{'='*60}")
+        logger.info(f"[Entity Linking] Starting processing {len(triplets)} triplets")
         
         linked_triplets = []
         link_stats = {
@@ -47,8 +50,8 @@ class EntityLinker:
             
             if subject_normalized != original_subject or object_normalized != original_object:
                 link_stats["normalized"] += 1
-                if idx <= 5:  # 只显示前5个的详细信息
-                    print(f"📝 [{idx}] 规范化: '{original_subject}' → '{subject_normalized}', '{original_object}' → '{object_normalized}'")
+                if idx <= 5:  # 只 show first 5 details
+                    logger.debug(f"[{idx}] Normalized: '{original_subject}' → '{subject_normalized}', '{original_object}' → '{object_normalized}'")
             
             # Find canonical names (merge with existing concepts)
             subject_canonical, subject_match_type = self._find_or_merge_concept(subject_normalized)
@@ -64,24 +67,24 @@ class EntityLinker:
             triplet.subject = subject_canonical
             triplet.object = object_canonical
             
-            # 显示链接结果（前5个）
+            # Show linking results (first 5)
             if idx <= 5:
                 if subject_canonical != subject_normalized:
-                    print(f"   🔗 主体链接: '{subject_normalized}' → '{subject_canonical}' ({subject_match_type})")
+                    logger.debug(f"   Linked subject: '{subject_normalized}' → '{subject_canonical}' ({subject_match_type})")
                 if object_canonical != object_normalized:
-                    print(f"   🔗 客体链接: '{object_normalized}' → '{object_canonical}' ({object_match_type})")
+                    logger.debug(f"   Linked object: '{object_normalized}' → '{object_canonical}' ({object_match_type})")
             
             linked_triplets.append(triplet)
         
-        # 显示统计信息
-        print(f"\n📊 [实体链接] 统计信息:")
-        print(f"   - 精确匹配: {link_stats['exact_match']} 次")
-        print(f"   - 模糊匹配: {link_stats['fuzzy_match']} 次")
-        print(f"   - 翻译匹配: {link_stats['translation_match']} 次")
-        print(f"   - 新建概念: {link_stats['new_concept']} 次")
-        print(f"   - 规范化处理: {link_stats['normalized']} 次")
-        print(f"✅ [实体链接] 完成，处理了 {len(linked_triplets)} 个三元组")
-        print(f"{'='*80}\n")
+        # Show statistics
+        logger.info(f"[Entity Linking] Statistics:")
+        logger.info(f"   - Exact matches: {link_stats['exact_match']}")
+        logger.info(f"   - Fuzzy matches: {link_stats['fuzzy_match']}")
+        logger.info(f"   - Translation matches: {link_stats['translation_match']}")
+        logger.info(f"   - New concepts: {link_stats['new_concept']}")
+        logger.info(f"   - Normalized: {link_stats['normalized']}")
+        logger.info(f"[Entity Linking] Completed, processed {len(linked_triplets)} triplets")
+        logger.info(f"{'='*60}")
         
         return linked_triplets
     

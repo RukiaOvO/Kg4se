@@ -3,6 +3,9 @@ from typing import Optional, Literal, List, Dict, Any
 from openai import OpenAI
 import anthropic
 import json
+from utils.logger import get_logger
+
+logger = get_logger("infra.ai_providers")
 
 
 # 支持的AI提供商类型
@@ -236,15 +239,15 @@ class OpenAICompatibleClient(BaseAIClient):
         # 如果 base_url 是 localhost:11434 且没有 /v1，自动添加
         if ':11434' in normalized_base_url and not normalized_base_url.endswith('/v1'):
             normalized_base_url = normalized_base_url + '/v1'
-            print(f"⚠️  [AI客户端] 检测到 Ollama base_url，已自动添加 /v1 后缀")
+            logger.warning(f"Detected Ollama base_url without /v1 suffix, auto-added")
         
         # 验证 base_url 格式
         if not normalized_base_url.startswith(('http://', 'https://')):
             raise ValueError(f"Invalid base_url format: {base_url}. Must start with http:// or https://")
         
-        print(f"[AI客户端] 初始化 OpenAI 兼容客户端")
-        print(f"   Model: {model}")
-        print(f"   Base URL: {normalized_base_url}")
+        logger.info(f"Initializing OpenAI-compatible client")
+        logger.info(f"   Model: {model}")
+        logger.info(f"   Base URL: {normalized_base_url}")
         
         self.client = OpenAI(
             api_key=api_key,
@@ -665,9 +668,9 @@ class AIClientSingleton:
             # Create new client
             client = AIProviderFactory.create_client(provider, api_key, model, base_url)
             cls._instances[key] = client
-            print(f"[AI客户端单例] 创建新实例: {provider}")
+            logger.debug(f"Created new singleton instance: {provider}")
         else:
-            print(f"[AI客户端单例] 使用已有实例: {provider}")
+            logger.debug(f"Using existing singleton instance: {provider}")
         
         return cls._instances[key]
     
@@ -686,7 +689,7 @@ class AIClientSingleton:
     def clear_all(cls):
         """Clear all cached client instances."""
         cls._instances = {}
-        print("[AI客户端单例] 已清除所有实例")
+        logger.info("Cleared all singleton instances")
     
     @classmethod
     def get_instance_count(cls) -> int:

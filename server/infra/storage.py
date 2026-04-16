@@ -10,9 +10,34 @@ from infra.config import settings
 class Storage:
     """Handles file storage and checksum calculation."""
     
+    # Characters not allowed in Windows filenames
+    _INVALID_FILENAME_CHARS = r'[\\/:*?"<>|]'
+    
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = Path(base_dir or settings.upload_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _sanitize_filename(self, filename: str) -> str:
+        """
+        Remove or replace invalid characters from filename for cross-platform compatibility.
+        
+        Args:
+            filename: Original filename
+            
+        Returns:
+            Sanitized filename safe for all operating systems
+        """
+        import re
+        # Replace invalid characters with underscore
+        sanitized = re.sub(self._INVALID_FILENAME_CHARS, '_', filename)
+        # Remove multiple consecutive underscores
+        sanitized = re.sub(r'_+', '_', sanitized)
+        # Remove leading/trailing underscores
+        sanitized = sanitized.strip('_')
+        # Ensure filename is not empty
+        if not sanitized:
+            sanitized = 'unnamed'
+        return sanitized
     
     async def save_file(self, file_content: bytes, filename: str) -> tuple[str, str]:
         """
@@ -30,7 +55,8 @@ class Storage:
         
         # Create filename with checksum prefix to avoid collisions
         file_ext = Path(filename).suffix
-        safe_filename = f"{checksum[:16]}_{Path(filename).stem}{file_ext}"
+        sanitized_stem = self._sanitize_filename(Path(filename).stem)
+        safe_filename = f"{checksum[:16]}_{sanitized_stem}{file_ext}"
         file_path = self.base_dir / safe_filename
         
         # Save file

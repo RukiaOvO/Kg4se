@@ -1,11 +1,17 @@
 """Document parsing services."""
 import re
 import os
-from typing import List, Dict, Any
+import json
+import csv
+import time
+from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 import fitz  # PyMuPDF
 from models.document import Chunk
 from bs4 import BeautifulSoup
+from utils.logger import get_logger
+
+logger = get_logger("services.parser")
 
 # 百度 OCR
 try:
@@ -25,35 +31,32 @@ class BaiduOCRClient:
     def _initialize(self):
         """初始化百度 OCR 客户端"""
         if not BAIDU_OCR_AVAILABLE:
-            print("[百度OCR] 库未安装，OCR 功能将被禁用")
+            logger.warning("[BaiduOCR] Library not installed, OCR functionality disabled")
             return
         
         app_id = os.environ.get('BAIDU_OCR_APP_ID', '')
         api_key = os.environ.get('BAIDU_OCR_API_KEY', '')
         secret_key = os.environ.get('BAIDU_OCR_SECRET_KEY', '')
 
-        # 检查配置完整性（不打印密钥内容）
         has_app_id = bool(app_id)
         has_api_key = bool(api_key)
         has_secret_key = bool(secret_key)
         
         if not has_app_id or not has_api_key or not has_secret_key:
-            print("[百度OCR] 未配置 API 密钥，OCR 功能将被禁用")
-            print(f"[百度OCR] 配置检查: APP_ID: {'✅' if has_app_id else '❌'}, API_KEY: {'✅' if has_api_key else '❌'}, SECRET_KEY: {'✅' if has_secret_key else '❌'}")
+            logger.warning("[BaiduOCR] API keys not configured, OCR functionality disabled")
+            logger.debug(f"[BaiduOCR] Config check: APP_ID: {'✅' if has_app_id else '❌'}, API_KEY: {'✅' if has_api_key else '❌'}, SECRET_KEY: {'✅' if has_secret_key else '❌'}")
             return
         
         try:
             self.client = AipOcr(app_id, api_key, secret_key)
-            print("[百度OCR] 客户端初始化成功")
+            logger.info("[BaiduOCR] Client initialized successfully")
         except Exception as e:
-            # 隐藏异常详情中的敏感信息
             error_msg = str(e)
-            # 替换可能泄露的密钥信息
             if api_key and api_key in error_msg:
                 error_msg = error_msg.replace(api_key, "***")
             if secret_key and secret_key in error_msg:
                 error_msg = error_msg.replace(secret_key, "***")
-            print(f"[百度OCR] 初始化失败: {error_msg}")
+            logger.error(f"[BaiduOCR] Initialization failed: {error_msg}")
     
     def recognize(self, image_bytes: bytes) -> str:
         """
@@ -69,24 +72,23 @@ class BaiduOCRClient:
             return ""
         
         try:
-            # 调用通用文字识别（高精度版）
             result = self.client.basicAccurate(image_bytes)
             
             if 'words_result' not in result:
-                print(f"[百度OCR] 识别失败: {result.get('error_msg', 'Unknown error')}")
+                logger.error(f"[BaiduOCR] Recognition failed: {result.get('error_msg', 'Unknown error')}")
                 return ""
             
-            # 提取识别结果
             text = "\n".join(item['words'] for item in result['words_result'])
-            print(f"[百度OCR] 识别成功，文本长度: {len(text)}")
+            logger.debug(f"[BaiduOCR] Recognition successful, text length: {len(text)}")
             return text
         
         except Exception as e:
-            print(f"[百度OCR] 识别异常: {e}")
+            logger.error(f"[BaiduOCR] Recognition error: {e}")
             return ""
 
-# 全局 OCR 客户端实例
+
 baidu_ocr_client = BaiduOCRClient()
+
 
 class Parser:
     """Base parser class."""
@@ -127,7 +129,6 @@ class Parser:
         
         chunks = []
         
-        # If text is smaller than chunk_size, return as single chunk
         if len(text) <= self.chunk_size:
             return [Chunk(
                 doc_id=doc_id,
@@ -136,12 +137,9 @@ class Parser:
                 meta=meta.copy()
             )]
         
-        # Split by paragraphs first
         paragraphs = [p.strip() for p in text.split('\n\n') if p.strip() and len(p.strip()) >= 10]
         
         if not paragraphs:
-            # Fallback: split by sentences if no paragraphs
-            import re
             sentences = re.split(r'[.!?。！？]\s+', text)
             paragraphs = [s.strip() for s in sentences if s.strip() and len(s.strip()) >= 10]
         
@@ -152,9 +150,7 @@ class Parser:
         for para in paragraphs:
             para_size = len(para)
             
-            # If single paragraph exceeds chunk_size, split it
             if para_size > self.chunk_size:
-                # Save current chunk if exists
                 if current_chunk:
                     chunks.append(Chunk(
                         doc_id=doc_id,
@@ -166,8 +162,6 @@ class Parser:
                     current_chunk = []
                     current_size = 0
                 
-                # Split large paragraph by sentences
-                import re
                 sentences = re.split(r'[.!?。！？]\s+', para)
                 for sent in sentences:
                     sent = sent.strip()
@@ -175,13 +169,12 @@ class Parser:
                         continue
                     
                     if len(sent) > self.chunk_size:
-                        # Even sentence is too long, split by words
                         words = sent.split()
                         current_sent = []
                         current_sent_size = 0
                         
                         for word in words:
-                            word_size = len(word) + 1  # +1 for space
+                            word_size = len(word) + 1
                             if current_sent_size + word_size > self.chunk_size and current_sent:
                                 chunks.append(Chunk(
                                     doc_id=doc_id,
@@ -200,7 +193,6 @@ class Parser:
                             current_chunk.append(" ".join(current_sent))
                             current_size += current_sent_size
                     else:
-                        # Sentence fits, add to current chunk
                         if current_size + len(sent) + 2 > self.chunk_size and current_chunk:
                             chunks.append(Chunk(
                                 doc_id=doc_id,
@@ -213,9 +205,8 @@ class Parser:
                             current_size = len(sent)
                         else:
                             current_chunk.append(sent)
-                            current_size += len(sent) + 2  # +2 for \n\n
+                            current_size += len(sent) + 2
             else:
-                # Check if adding this paragraph would exceed chunk_size
                 if current_size + para_size + 2 > self.chunk_size and current_chunk:
                     chunks.append(Chunk(
                         doc_id=doc_id,
@@ -228,9 +219,8 @@ class Parser:
                     current_size = para_size
                 else:
                     current_chunk.append(para)
-                    current_size += para_size + 2  # +2 for \n\n
+                    current_size += para_size + 2
         
-        # Add remaining chunk
         if current_chunk:
             chunks.append(Chunk(
                 doc_id=doc_id,
@@ -243,12 +233,11 @@ class Parser:
 
     def _split_by_boundaries(self, text: str) -> List[str]:
         """Split text by meaningful boundaries."""
-        # 按照章节标记、标题等进行分割
         patterns = [
-            r'\n#{1,6}\s+',  # Markdown 标题
-            r'\n\s*[-*]\s+',  # 列表项
-            r'\n\s*\d+\.\s+',  # 编号列表
-            r'\n{2,}',  # 多个换行符
+            r'\n#{1,6}\s+',
+            r'\n\s*[-*]\s+',
+            r'\n\s*\d+\.\s+',
+            r'\n{2,}',
         ]
 
         sections = []
@@ -265,7 +254,6 @@ class Parser:
                             sections.append(section)
                     start = match.end()
 
-        # 添加剩余的文本
         if start < len(text):
             section = text[start:].strip()
             if section:
@@ -275,19 +263,16 @@ class Parser:
 
     def _split_sentences(self, text: str) -> List[str]:
         """Split text into sentences."""
-        # 双语句子分割
         sentences = []
         current = ""
 
         for char in text:
             current += char
             if char in '.!?。！？':
-                # 检查是否真的是句子结尾
                 if len(current) > 1:
                     sentences.append(current.strip())
                     current = ""
 
-        # 如果有剩余文本，作为最后一个句子
         if current.strip():
             sentences.append(current.strip())
 
@@ -297,40 +282,84 @@ class Parser:
 class PDFParser(Parser):
     """PDF parser using Docling with fallback to PyMuPDF + Baidu OCR."""
     
-    def __init__(self, chunk_size: int = 2000):
+    _docling_converter = None
+    _docling_initialized = False
+    _docling_lock = False
+    
+    def __init__(self, chunk_size: int = 2000, timeout: int = 300):
         """
         Initialize PDF parser.
         
         Args:
             chunk_size: Maximum characters per chunk (default: 2000)
+            timeout: Maximum parsing time in seconds (default: 300)
         """
         super().__init__(chunk_size=chunk_size)
-        # 检查百度 OCR 是否可用
         self.use_ocr = BAIDU_OCR_AVAILABLE and baidu_ocr_client.client
-        # 检查 Docling 是否可用
         self._docling_available = self._check_docling()
-
+        self._timeout = timeout
+        self._parse_metrics = {}
+        
+        if self._docling_available and not PDFParser._docling_initialized:
+            self._initialize_docling()
+    
     def _check_docling(self) -> bool:
         """检查 Docling 是否可用"""
         try:
             from docling.document_converter import DocumentConverter
             return True
         except ImportError:
+            logger.warning("[Docling] Library not installed")
             return False
-
-    def parse(self, file_path: str) -> tuple[str, List[Chunk]]:
+        except Exception as e:
+            logger.warning(f"[Docling] Failed to check availability: {e}")
+            return False
+    
+    def _initialize_docling(self):
+        """初始化 Docling 转换器（线程安全）"""
+        if PDFParser._docling_lock:
+            return
+        
+        PDFParser._docling_lock = True
+        try:
+            if not PDFParser._docling_converter:
+                from docling.document_converter import DocumentConverter
+                PDFParser._docling_converter = DocumentConverter()
+                logger.info("[Docling] DocumentConverter initialized successfully")
+                PDFParser._docling_initialized = True
+        except Exception as e:
+            logger.error(f"[Docling] Failed to initialize converter: {e}")
+        finally:
+            PDFParser._docling_lock = False
+    
+    def _get_docling_converter(self) -> Any:
+        """获取 Docling 转换器实例"""
+        if not PDFParser._docling_converter:
+            self._initialize_docling()
+        return PDFParser._docling_converter
+    
+    def parse(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """Parse PDF file.优先使用 Docling，失败后回退到 PyMuPDF."""
-        # 首先尝试使用 Docling
         if self._docling_available:
             try:
                 return self._parse_with_docling(file_path)
+            except ImportError as e:
+                logger.error(f"[Docling] Import failed: {e}")
+            except MemoryError as e:
+                logger.error(f"[Docling] Memory error processing {file_path}: {e}")
+            except TimeoutError as e:
+                logger.error(f"[Docling] Timeout processing {file_path}: {e}")
+            except ValueError as e:
+                logger.error(f"[Docling] Invalid document: {e}")
             except Exception as e:
-                print(f"[Docling] 解析失败，回退到 PyMuPDF: {e}")
+                logger.error(f"[Docling] Unexpected error processing {file_path}: {e}")
+                import traceback
+                logger.debug(f"[Docling] Traceback: {traceback.format_exc()}")
         
-        # 使用 PyMuPDF 作为回退
+        logger.info(f"[PDF Parser] Falling back to PyMuPDF for: {file_path}")
         return self._parse_with_pymupdf(file_path)
-
-    def _parse_with_docling(self, file_path: str) -> tuple[str, List[Chunk]]:
+    
+    def _parse_with_docling(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """
         使用 Docling 解析 PDF（支持多模态内容）
         
@@ -339,27 +368,65 @@ class PDFParser(Parser):
         
         Returns:
             (full_text, chunks) 元组
+        
+        Raises:
+            RuntimeError: 如果转换器未初始化
+            ValueError: 如果文档转换失败
+            TimeoutError: 如果处理超时
         """
-        from docling.document_converter import DocumentConverter
-        from docling.datamodel.document import Document
-        from docling.datamodel.elements import Table, Figure, TextBlock, Equation, CodeBlock
+        start_time = time.time()
+        logger.info(f"{'='*60}")
+        logger.info(f"[Docling] Starting multi-modal document parsing: {file_path}")
         
-        print(f"\n{'='*80}")
-        print(f"🔍 [Docling] 开始解析多模态文档: {file_path}")
+        converter = self._get_docling_converter()
+        if not converter:
+            raise RuntimeError("[Docling] Converter not initialized")
         
-        converter = DocumentConverter()
-        result: Document = converter.convert(file_path)
+        result = converter.convert(file_path)
+        
+        if result is None:
+            raise ValueError(f"[Docling] Document conversion returned None: {file_path}")
+        
+        elements = getattr(result, 'elements', None)
+        if elements is None:
+            logger.warning(f"[Docling] No elements found in document: {file_path}")
+            return "", []
+            
+        if not isinstance(elements, list):
+            logger.warning(f"[Docling] Elements is not a list: {type(elements)}")
+            return "", []
+        
+        element_types = {}
+        try:
+            from docling.datamodel.elements import Table, Figure, TextBlock
+            element_types = {
+                'TextBlock': TextBlock,
+                'Table': Table,
+                'Figure': Figure,
+            }
+            try:
+                from docling.datamodel.elements import Equation
+                element_types['Equation'] = Equation
+            except ImportError:
+                pass
+            try:
+                from docling.datamodel.elements import CodeBlock
+                element_types['CodeBlock'] = CodeBlock
+            except ImportError:
+                pass
+        except ImportError as e:
+            logger.warning(f"[Docling] Failed to import element types: {e}")
         
         full_text = ""
         chunks = []
         doc_id = Path(file_path).stem
+        element_count = {k: 0 for k in element_types.keys()}
         
-        for element in result.elements:
-            element_type = type(element).__name__
+        for element in elements:
+            element_type_name = type(element).__name__
             page_num = getattr(element, 'page_num', 1)
             
-            if isinstance(element, TextBlock):
-                # 文本块处理
+            if isinstance(element, element_types.get('TextBlock', object)):
                 text = getattr(element, 'content', '').strip()
                 if text and len(text) >= 10:
                     full_text += text + "\n\n"
@@ -371,14 +438,14 @@ class PDFParser(Parser):
                             "type": "text",
                             "page": page_num,
                             "source": "docling",
-                            "element_type": element_type
+                            "element_type": element_type_name
                         }
                     )
                     chunks.append(chunk)
-                    print(f"📝 [Docling] 提取文本块: page={page_num}, length={len(text)}")
+                    element_count['TextBlock'] += 1
+                    logger.debug(f"[Docling] Extracted text block: page={page_num}, length={len(text)}")
             
-            elif isinstance(element, Table):
-                # 表格处理 → 转换为 Markdown 格式
+            elif isinstance(element, element_types.get('Table', object)):
                 table_md = self._table_to_markdown(element)
                 if table_md:
                     full_text += table_md + "\n\n"
@@ -390,21 +457,20 @@ class PDFParser(Parser):
                             "type": "table",
                             "page": page_num,
                             "source": "docling",
-                            "element_type": element_type,
-                            "rows": len(element.rows) if hasattr(element, 'rows') else 0,
+                            "element_type": element_type_name,
+                            "rows": len(getattr(element, 'rows', [])),
                             "cols": self._count_table_cols(element)
                         }
                     )
                     chunks.append(chunk)
-                    print(f"📊 [Docling] 提取表格: page={page_num}, rows={chunk.meta['rows']}, cols={chunk.meta['cols']}")
+                    element_count['Table'] += 1
+                    logger.debug(f"[Docling] Extracted table: page={page_num}")
             
-            elif isinstance(element, Figure):
-                # 图表处理 → 提取标题和描述
+            elif isinstance(element, element_types.get('Figure', object)):
                 caption = getattr(element, 'caption', '') or ''
                 description = getattr(element, 'description', '') or ''
                 fig_type = getattr(element, 'figure_type', 'unknown')
                 
-                # 构建图表描述文本
                 fig_text = self._build_figure_text(caption, description, fig_type)
                 if fig_text:
                     full_text += fig_text + "\n\n"
@@ -416,17 +482,17 @@ class PDFParser(Parser):
                             "type": "figure",
                             "page": page_num,
                             "source": "docling",
-                            "element_type": element_type,
+                            "element_type": element_type_name,
                             "figure_type": fig_type,
                             "caption": caption,
                             "description": description
                         }
                     )
                     chunks.append(chunk)
-                    print(f"🖼️ [Docling] 提取图表: page={page_num}, type={fig_type}")
+                    element_count['Figure'] += 1
+                    logger.debug(f"[Docling] Extracted figure: page={page_num}, type={fig_type}")
             
-            elif isinstance(element, Equation):
-                # 公式处理 → LaTeX 格式
+            elif isinstance(element, element_types.get('Equation', object)):
                 latex = getattr(element, 'latex', '') or str(element)
                 if latex and len(latex) >= 5:
                     full_text += f"$$ {latex} $$\n\n"
@@ -438,15 +504,15 @@ class PDFParser(Parser):
                             "type": "equation",
                             "page": page_num,
                             "source": "docling",
-                            "element_type": element_type,
+                            "element_type": element_type_name,
                             "latex": latex
                         }
                     )
                     chunks.append(chunk)
-                    print(f"∑ [Docling] 提取公式: page={page_num}, length={len(latex)}")
+                    element_count['Equation'] += 1
+                    logger.debug(f"[Docling] Extracted equation: page={page_num}")
             
-            elif isinstance(element, CodeBlock):
-                # 代码块处理
+            elif isinstance(element, element_types.get('CodeBlock', object)):
                 code_text = getattr(element, 'content', '') or ''
                 language = getattr(element, 'language', 'unknown')
                 if code_text and len(code_text) >= 10:
@@ -459,63 +525,87 @@ class PDFParser(Parser):
                             "type": "code",
                             "page": page_num,
                             "source": "docling",
-                            "element_type": element_type,
+                            "element_type": element_type_name,
                             "language": language
                         }
                     )
                     chunks.append(chunk)
-                    print(f"💻 [Docling] 提取代码块: page={page_num}, language={language}")
+                    element_count['CodeBlock'] += 1
+                    logger.debug(f"[Docling] Extracted code block: page={page_num}, language={language}")
+            
+            else:
+                logger.debug(f"[Docling] Skipping unknown element type: {element_type_name}")
         
-        print(f"✅ [Docling] 解析完成: 共 {len(chunks)} 个多模态块")
-        print(f"{'='*80}\n")
+        parse_time = time.time() - start_time
+        self._parse_metrics = {
+            'parse_time': parse_time,
+            'total_chunks': len(chunks),
+            **element_count
+        }
+        
+        logger.info(f"[Docling] Parsing completed in {parse_time:.2f}s")
+        logger.info(f"[Docling] Element breakdown: {element_count}")
+        logger.info(f"[Docling] Total chunks: {len(chunks)}")
+        logger.info(f"{'='*60}")
         
         return full_text, chunks
     
     def _table_to_markdown(self, table) -> str:
-        """
-        将 Docling Table 元素转换为 Markdown 表格
-        
-        Args:
-            table: Docling Table 元素
-        
-        Returns:
-            Markdown 格式的表格字符串
-        """
+        """将 Docling Table 元素转换为 Markdown 表格"""
         if not table:
             return ""
         
         try:
-            rows = getattr(table, 'rows', [])
-            if not rows:
+            rows = getattr(table, 'rows', None)
+            if rows is None or not isinstance(rows, list) or len(rows) == 0:
+                logger.debug("[Docling] Table has no rows")
                 return ""
             
             md_lines = []
+            header_processed = False
             
-            # 处理表头
             header = getattr(table, 'header', None)
-            if header and hasattr(header, 'cells'):
-                headers = []
-                for cell in header.cells:
-                    cell_text = getattr(cell, 'content', '').strip() or '---'
-                    headers.append(cell_text)
-                md_lines.append(f"| {' | '.join(headers)} |")
-                md_lines.append(f"| {' | '.join(['---'] * len(headers))} |")
+            if header:
+                header_cells = getattr(header, 'cells', None)
+                if header_cells and isinstance(header_cells, list):
+                    headers = []
+                    for cell in header_cells:
+                        cell_text = getattr(cell, 'content', '').strip() or '---'
+                        headers.append(cell_text)
+                    md_lines.append(f"| {' | '.join(headers)} |")
+                    md_lines.append(f"| {' | '.join(['---'] * len(headers))} |")
+                    header_processed = True
             
-            # 处理表格行
-            for row in rows:
-                if hasattr(row, 'cells'):
-                    cells = []
-                    for cell in row.cells:
-                        cell_text = getattr(cell, 'content', '').strip() or ''
-                        # 处理换行符
-                        cell_text = cell_text.replace('\n', ' ')
-                        cells.append(cell_text)
+            for row_idx, row in enumerate(rows):
+                row_cells = getattr(row, 'cells', None)
+                if not row_cells or not isinstance(row_cells, list):
+                    continue
+                
+                if not header_processed and row_idx == 0:
+                    headers = []
+                    for cell in row_cells:
+                        cell_text = getattr(cell, 'content', '').strip() or '---'
+                        headers.append(cell_text)
+                    md_lines.append(f"| {' | '.join(headers)} |")
+                    md_lines.append(f"| {' | '.join(['---'] * len(headers))} |")
+                    header_processed = True
+                    continue
+                
+                cells = []
+                for cell in row_cells:
+                    cell_text = getattr(cell, 'content', '').strip() or ''
+                    cell_text = cell_text.replace('\n', ' ')
+                    cells.append(cell_text)
+                
+                if cells:
                     md_lines.append(f"| {' | '.join(cells)} |")
             
             return '\n'.join(md_lines)
         
         except Exception as e:
-            print(f"⚠️ [Docling] 表格转换失败: {e}")
+            logger.error(f"[Docling] Table conversion failed: {e}")
+            import traceback
+            logger.debug(f"[Docling] Table conversion traceback: {traceback.format_exc()}")
             return ""
     
     def _count_table_cols(self, table) -> int:
@@ -527,22 +617,12 @@ class PDFParser(Parser):
                 first_row = table.rows[0]
                 if hasattr(first_row, 'cells'):
                     return len(first_row.cells)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"[Docling] Failed to count table columns: {e}")
         return 0
     
     def _build_figure_text(self, caption: str, description: str, fig_type: str) -> str:
-        """
-        构建图表描述文本
-        
-        Args:
-            caption: 图表标题
-            description: 图表描述
-            fig_type: 图表类型
-        
-        Returns:
-            结构化的图表描述文本
-        """
+        """构建图表描述文本"""
         parts = []
         
         if fig_type:
@@ -552,39 +632,31 @@ class PDFParser(Parser):
         if description:
             parts.append(f"图表描述: {description}")
         
-        if parts:
-            return "\n".join(parts)
-        return ""
-
-    def _parse_with_pymupdf(self, file_path: str) -> tuple[str, List[Chunk]]:
+        return "\n".join(parts) if parts else ""
+    
+    def _parse_with_pymupdf(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """使用 PyMuPDF 解析 PDF（回退方案）"""
         chunks = []
         full_text_parts = []
         doc_id = Path(file_path).stem
         
-        # 使用 with 语句确保文档正确关闭
         with fitz.open(file_path) as doc:
             for page_num in range(len(doc)):
                 page = doc[page_num]
-
-                # 1. 首先尝试提取嵌入文本
                 text = page.get_text()
 
-                # 2. 如果文本很少或为空，尝试 OCR
                 if self.use_ocr and (not text.strip() or len(text.strip()) < 50):
                     ocr_text = self._extract_text_with_ocr(page)
                     if ocr_text and len(ocr_text) > len(text):
                         text = ocr_text
-                        print(f"[OCR] 页面 {page_num + 1} 使用百度 OCR 提取")
+                        logger.debug(f"[OCR] Page {page_num + 1} extracted using Baidu OCR")
                 
-                # 3. 如果仍然没有文本，跳过该页面
                 if not text.strip():
-                    print(f"[PDF解析] 页面 {page_num + 1} 无有效文本")
+                    logger.debug(f"[PDF Parsing] Page {page_num + 1} has no valid text")
                     continue
                 
                 full_text_parts.append(text)
                 
-                # Use smart chunking with page-aware metadata
                 page_chunks = self._smart_chunk(
                     text=text,
                     doc_id=doc_id,
@@ -601,14 +673,13 @@ class PDFParser(Parser):
         
         full_text = "\n\n".join(full_text_parts)
         return full_text, chunks
-
+    
     def _extract_text_with_ocr(self, page) -> str:
         """Extract text from page images using Baidu OCR."""
         if not self.use_ocr:
             return ""
         
         try:
-            # 获取页面中的所有图片
             images = page.get_images(full=True)
             if not images:
                 return ""
@@ -616,16 +687,12 @@ class PDFParser(Parser):
             ocr_text = []
             
             for img_index, img in enumerate(images):
-                # 获取图片信息
                 xref = img[0]
                 base_image = page.parent.extract_image(xref)
                 if not base_image:
                     continue
                 
-                # 获取图片字节数据
                 img_bytes = base_image["image"]
-                
-                # 使用百度 OCR 识别
                 text = baidu_ocr_client.recognize(img_bytes)
                 if text.strip():
                     ocr_text.append(text.strip())
@@ -633,14 +700,14 @@ class PDFParser(Parser):
             return "\n\n".join(ocr_text)
         
         except Exception as e:
-            print(f"[OCR] 页面处理失败: {e}")
+            logger.error(f"[OCR] Page processing failed: {e}")
             return ""
 
 
 class MarkdownParser(Parser):
     """Markdown parser."""
     
-    def parse(self, file_path: str) -> tuple[str, List[Chunk]]:
+    def parse(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """Parse Markdown file."""
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -648,7 +715,6 @@ class MarkdownParser(Parser):
         chunks = []
         doc_id = Path(file_path).stem
         
-        # Split by headers and paragraphs
         sections = re.split(r'\n(#{1,6}\s+.+?)\n', content)
         
         current_section = None
@@ -656,7 +722,6 @@ class MarkdownParser(Parser):
         
         for i, section in enumerate(sections):
             if i == 0:
-                # First section might be content without header
                 if section.strip():
                     section_chunks = self._smart_chunk(
                         text=section.strip(),
@@ -673,10 +738,8 @@ class MarkdownParser(Parser):
                 continue
             
             if section.startswith('#'):
-                # This is a header
                 current_section = section.strip()
             else:
-                # This is content
                 if section.strip():
                     section_chunks = self._smart_chunk(
                         text=section.strip(),
@@ -693,69 +756,17 @@ class MarkdownParser(Parser):
         
         return content, chunks
 
-    def _extract_text_with_ocr(self, page) -> str:
-        """Extract text from page images using OCR."""
-        if not OCR_AVAILABLE:
-            return ""
-        
-        try:
-            # 获取页面中的所有图片
-            images = page.get_images(full=True)
-            if not images:
-                return ""
-            
-            ocr_text = []
-            
-            for img_index, img in enumerate(images):
-                # 获取图片信息
-                xref = img[0]
-                base_image = page.parent.extract_image(xref)
-                if not base_image:
-                    continue
-                
-                # 获取图片字节数据
-                img_bytes = base_image["image"]
-                width = base_image["width"]
-                height = base_image["height"]
-                
-                try:
-                    # 使用 PIL 打开图片
-                    image = Image.frombytes(
-                        "RGB", 
-                        (width, height), 
-                        img_bytes,
-                        "raw",
-                        "BGR"
-                    )
-                    
-                    # 使用 Tesseract OCR 提取文本
-                    # 添加中文和英文语言支持
-                    text = pytesseract.image_to_string(image, lang="chi_sim+eng")
-                    if text.strip():
-                        ocr_text.append(text.strip())
-                
-                except Exception as e:
-                    print(f"[OCR] 处理图片 {img_index} 失败: {e}")
-                    continue
-            
-            return "\n\n".join(ocr_text)
-        
-        except Exception as e:
-            print(f"[OCR] 页面处理失败: {e}")
-            return ""
-
 
 class TxtParser(Parser):
     """Plain text parser."""
     
-    def parse(self, file_path: str) -> tuple[str, List[Chunk]]:
+    def parse(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """Parse TXT file."""
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
         doc_id = Path(file_path).stem
         
-        # Use smart chunking
         chunks = self._smart_chunk(
             text=content,
             doc_id=doc_id,
@@ -773,7 +784,7 @@ class TxtParser(Parser):
 class WordParser(Parser):
     """Word document parser (DOC/DOCX)."""
     
-    def parse(self, file_path: str) -> tuple[str, List[Chunk]]:
+    def parse(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """Parse Word document."""
         try:
             import docx
@@ -785,7 +796,6 @@ class WordParser(Parser):
         full_text_parts = []
         doc_id = Path(file_path).stem
         
-        # Collect all paragraphs first
         all_text = []
         current_section = None
         
@@ -796,7 +806,6 @@ class WordParser(Parser):
             
             section = para.style.name if para.style else None
             if section != current_section:
-                # Section changed, process accumulated text
                 if all_text:
                     section_text = "\n\n".join(all_text)
                     full_text_parts.append(section_text)
@@ -816,7 +825,6 @@ class WordParser(Parser):
             
             all_text.append(text)
         
-        # Process remaining text
         if all_text:
             section_text = "\n\n".join(all_text)
             full_text_parts.append(section_text)
@@ -835,11 +843,11 @@ class WordParser(Parser):
         full_text = "\n\n".join(full_text_parts)
         return full_text, chunks
 
-# 新增Csv文件解析器
+
 class CSVParser(Parser):
     """CSV file parser."""
 
-    def parse(self, file_path: str) -> tuple[str, List[Chunk]]:
+    def parse(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """Parse CSV file."""
         with open(file_path, 'r', encoding='utf-8') as f:
             reader = csv.reader(f)
@@ -851,12 +859,11 @@ class CSVParser(Parser):
         if not rows:
             return "", chunks
 
-        # 创建文本表示并带有表头
         headers = rows[0]
         content_parts = []
 
         for idx, row in enumerate(rows[1:], 1):
-            if not any(row):  # 跳过空行
+            if not any(row):
                 continue
 
             row_text = f"行 {idx}: " + " | ".join(
@@ -884,11 +891,10 @@ class CSVParser(Parser):
         return full_text, chunks
 
 
-# 新增的JSON解析器
 class JSONParser(Parser):
     """JSON file parser."""
 
-    def parse(self, file_path: str) -> tuple[str, List[Chunk]]:
+    def parse(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """Parse JSON file."""
         with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -923,7 +929,6 @@ class JSONParser(Parser):
         text_lines = json_to_text(data)
         full_text = "\n".join(text_lines)
 
-        # 创建 chunks
         chunks = self._smart_chunk(
             text=full_text,
             doc_id=doc_id,
@@ -940,18 +945,16 @@ class JSONParser(Parser):
         return full_text, chunks
 
 
-# 新增的Excel解析器
 class ExcelParser(Parser):
     """Excel file parser."""
 
-    def parse(self, file_path: str) -> tuple[str, List[Chunk]]:
+    def parse(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """Parse Excel file."""
         try:
             import pandas as pd
         except ImportError:
             raise ImportError("pandas is required for Excel parsing. Install with: pip install pandas")
 
-        # 尝试读取Excel文件
         try:
             excel_file = pd.ExcelFile(file_path)
             doc_id = Path(file_path).stem
@@ -961,11 +964,9 @@ class ExcelParser(Parser):
             for sheet_name in excel_file.sheet_names:
                 df = excel_file.parse(sheet_name)
 
-                # 转为文本
                 sheet_text = f"工作表: {sheet_name}\n"
                 sheet_text += f"形状: {df.shape[0]}行 × {df.shape[1]}列\n\n"
 
-                # 添加列描述
                 sheet_text += "列名:\n"
                 for col in df.columns:
                     sample = str(df[col].iloc[0]) if len(df) > 0 else "空"
@@ -973,7 +974,6 @@ class ExcelParser(Parser):
 
                 sheet_text += "\n数据预览:\n"
 
-                #转换前几行数据为文本
                 preview_rows = min(20, len(df))
                 for i in range(preview_rows):
                     row_text = f"行 {i + 1}: "
@@ -984,7 +984,6 @@ class ExcelParser(Parser):
                     row_text += " | ".join(row_data)
                     sheet_text += row_text + "\n"
 
-                #为每个工作表创建chunk
                 sheet_chunks = self._smart_chunk(
                     text=sheet_text,
                     doc_id=doc_id,
@@ -1009,18 +1008,19 @@ class ExcelParser(Parser):
         except Exception as e:
             raise ValueError(f"Failed to parse Excel file: {e}")
 
+
 class WebParser(Parser):
     """Web page parser using requests and BeautifulSoup."""
     
-    def parse(self, url: str) -> tuple[str, List[Chunk]]:
+    def parse(self, url: str) -> Tuple[str, List[Chunk]]:
         """Parse web page content."""
         try:
+            import requests
             response = requests.get(url, timeout=10)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # 提取主要内容
             main_content = soup.find('main') or soup.find('article') or soup.body
             
             if main_content:
@@ -1028,7 +1028,6 @@ class WebParser(Parser):
             else:
                 text = soup.get_text(separator='\n', strip=True)
             
-            # 清理文本
             text = re.sub(r'\n+', '\n\n', text)
             text = text.strip()
             
@@ -1048,8 +1047,9 @@ class WebParser(Parser):
             return text, chunks
         
         except Exception as e:
-            print(f"[网页解析] 爬取失败: {e}")
+            logger.error(f"[Web Scraping] Failed to crawl: {e}")
             return "", []
+
 
 class ParserFactory:
     """Factory for creating parsers based on file type."""
@@ -1082,4 +1082,3 @@ class ParserFactory:
             raise ValueError(f"Unsupported document kind: {kind}")
         
         return parser_class(chunk_size=chunk_size)
-

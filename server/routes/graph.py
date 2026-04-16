@@ -71,6 +71,17 @@ async def visualize_graph(
                 node_props = neo4j_client._convert_neo4j_types(node_props)
                 labels = list(node.labels) if hasattr(node, "labels") else []
                 
+                # 如果没有标签，根据属性推断类型
+                if not labels:
+                    if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
+                        labels = ["Document"]
+                    elif node_props.get("type") == "concept":
+                        labels = ["Concept"]
+                    elif node_props.get("type") == "entity":
+                        labels = ["Entity"]
+                    else:
+                        labels = ["Concept"]
+                
                 # Create unique node ID
                 node_id = node_props.get("id") or node_props.get("name")
                 if not node_id:
@@ -95,6 +106,17 @@ async def visualize_graph(
                 # Convert Neo4j types in properties
                 node_props = neo4j_client._convert_neo4j_types(node_props)
                 labels = list(node.labels) if hasattr(node, "labels") else []
+                
+                # 如果没有标签，根据属性推断类型
+                if not labels:
+                    if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
+                        labels = ["Document"]
+                    elif node_props.get("type") == "concept":
+                        labels = ["Concept"]
+                    elif node_props.get("type") == "entity":
+                        labels = ["Entity"]
+                    else:
+                        labels = ["Concept"]
                 
                 node_id = node_props.get("id") or node_props.get("name")
                 if not node_id:
@@ -400,81 +422,138 @@ async def get_document_graph(
     if not doc_check:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # Query for document and related nodes up to depth, with conservative limits to avoid OOM
+    # 使用简单直接的查询，与全局图谱API完全相同的返回格式
+    # 查询文档节点以及所有与文档相关的节点和关系
+    # 先匹配文档节点，然后使用 WITH 传递，避免在 EXISTS 中引入新变量
     query = f"""
     MATCH (d:Document {{id: $doc_id}})
-    OPTIONAL MATCH path = (d)-[*1..{depth}]-(n)
-    WITH d, n, relationships(path) as rels
-    LIMIT 300
-    RETURN d, n, rels
+    MATCH (n)
+    WHERE n.id = $doc_id OR EXISTS((n)-[*1..{depth}]-(d))
+    OPTIONAL MATCH (n)-[r]->(m)
+    WHERE m.id = $doc_id OR EXISTS((m)-[*1..{depth}]-(d)) OR m IS NULL
+    RETURN n, r, m
+    LIMIT 500
     """
     
     results = neo4j_client.execute_query(query, {"doc_id": document_id})
     
-    nodes_dict = {}
-    edges = []
+    # 完全复制全局图谱API的处理逻辑
+    nodes_dict: Dict[str, Dict[str, Any]] = {}
+    edges: List[Dict[str, Any]] = []
     
     for record in results:
-        # Add document node
-        if "d" in record and record["d"]:
-            doc_node = record["d"]
-            doc_props = dict(doc_node) if hasattr(doc_node, "__getitem__") else {}
-            doc_labels = list(doc_node.labels) if hasattr(doc_node, "labels") else ["Document"]
-            
-            doc_id_val = doc_props.get("id")
-            if not doc_id_val:
-                doc_id_val = getattr(doc_node, "element_id", None) or str(getattr(doc_node, "id", hash(str(doc_node))))
-            
-            if doc_id_val not in nodes_dict:
-                nodes_dict[doc_id_val] = Node(
-                    id=str(doc_id_val),
-                    labels=doc_labels,
-                    properties=neo4j_client._convert_neo4j_types(doc_props)
-                )
-        
-        # Add related node
+        # Process source node (n)
         if "n" in record and record["n"]:
             node = record["n"]
-            props = dict(node) if hasattr(node, "__getitem__") else {}
-            labels = list(node.labels) if hasattr(node, "labels") else ["Concept"]
+            node_props = dict(node) if isinstance(node, dict) else node
+            # Convert Neo4j types in properties
+            node_props = neo4j_client._convert_neo4j_types(node_props)
+            labels = list(node.labels) if hasattr(node, "labels") else []
             
-            node_id = props.get("id") or props.get("name")
+            # 如果没有标签，根据属性推断类型
+            if not labels:
+                if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
+                    labels = ["Document"]
+                elif node_props.get("type") == "concept":
+                    labels = ["Concept"]
+                elif node_props.get("type") == "entity":
+                    labels = ["Entity"]
+                else:
+                    labels = ["Concept"]
+            
+            # Create unique node ID
+            node_id = node_props.get("id") or node_props.get("name")
             if not node_id:
-                node_id = getattr(node, "element_id", None) or str(getattr(node, "id", hash(str(node))))
+                node_id = getattr(node, "element_id", None) or str(id(node))
+            
+            node_id = str(node_id)
             
             if node_id not in nodes_dict:
-                nodes_dict[node_id] = Node(
-                    id=str(node_id),
-                    labels=labels,
-                    properties=neo4j_client._convert_neo4j_types(props)
-                )
-
+                nodes_dict[node_id] = {
+                    "id": node_id,
+                    "labels": labels,
+                    "type": labels[0] if labels else "Unknown",
+                    "label": node_props.get("name") or node_props.get("filename") or node_id,
+                    "properties": node_props,
+                    "degree": 0  # Will be updated based on relationships
+                }
         
-        # Add relationships
-        if "rels" in record and record["rels"]:
-            for rel in record["rels"]:
-                if hasattr(rel, "start_node") and hasattr(rel, "end_node"):
-                    # Get source ID
-                    start_props = dict(rel.start_node) if hasattr(rel.start_node, "__getitem__") else {}
-                    source_id = start_props.get("id") or start_props.get("name")
-                    if not source_id:
-                        source_id = getattr(rel.start_node, "element_id", None) or str(getattr(rel.start_node, "id", hash(str(rel.start_node))))
-                    
-                    # Get target ID
-                    end_props = dict(rel.end_node) if hasattr(rel.end_node, "__getitem__") else {}
-                    target_id = end_props.get("id") or end_props.get("name")
-                    if not target_id:
-                        target_id = getattr(rel.end_node, "element_id", None) or str(getattr(rel.end_node, "id", hash(str(rel.end_node))))
-                    
-                    rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
-                    rel_props = dict(rel) if hasattr(rel, "__getitem__") else {}
-                    
-                    edges.append(Edge(
-                        source=str(source_id),
-                        target=str(target_id),
-                        type=rel_type,
-                        properties=neo4j_client._convert_neo4j_types(rel_props)
-                    ))
+        # Process target node (m)
+        if "m" in record and record["m"]:
+            node = record["m"]
+            node_props = dict(node) if isinstance(node, dict) else node
+            # Convert Neo4j types in properties
+            node_props = neo4j_client._convert_neo4j_types(node_props)
+            labels = list(node.labels) if hasattr(node, "labels") else []
+            
+            # 如果没有标签，根据属性推断类型
+            if not labels:
+                if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
+                    labels = ["Document"]
+                elif node_props.get("type") == "concept":
+                    labels = ["Concept"]
+                elif node_props.get("type") == "entity":
+                    labels = ["Entity"]
+                else:
+                    labels = ["Concept"]
+            
+            node_id = node_props.get("id") or node_props.get("name")
+            if not node_id:
+                node_id = getattr(node, "element_id", None) or str(id(node))
+            
+            node_id = str(node_id)
+            
+            if node_id not in nodes_dict:
+                nodes_dict[node_id] = {
+                    "id": node_id,
+                    "labels": labels,
+                    "type": labels[0] if labels else "Unknown",
+                    "label": node_props.get("name") or node_props.get("filename") or node_id,
+                    "properties": node_props,
+                    "degree": 0
+                }
+        
+        # Process relationship (r)
+        if "r" in record and record["r"]:
+            rel = record["r"]
+            source_node = record.get("n")
+            target_node = record.get("m")
+            
+            if source_node and target_node:
+                # Get source node ID
+                source_props = dict(source_node) if isinstance(source_node, dict) else source_node
+                source_id = source_props.get("id") or source_props.get("name")
+                if not source_id:
+                    source_id = getattr(source_node, "element_id", None) or str(id(source_node))
+                source_id = str(source_id)
+                
+                # Get target node ID
+                target_props = dict(target_node) if isinstance(target_node, dict) else target_node
+                target_id = target_props.get("id") or target_props.get("name")
+                if not target_id:
+                    target_id = getattr(target_node, "element_id", None) or str(id(target_node))
+                target_id = str(target_id)
+                
+                # Get relationship type and properties
+                rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
+                rel_props = dict(rel) if isinstance(rel, dict) else rel
+                # Convert Neo4j types in relationship properties
+                rel_props = neo4j_client._convert_neo4j_types(rel_props)
+                
+                edges.append({
+                    "id": f"{source_id}_{rel_type}_{target_id}",
+                    "source": source_id,
+                    "target": target_id,
+                    "type": rel_type,
+                    "label": rel_type,
+                    "properties": rel_props
+                })
+                
+                # Update degree for both nodes
+                if source_id in nodes_dict:
+                    nodes_dict[source_id]["degree"] += 1
+                if target_id in nodes_dict:
+                    nodes_dict[target_id]["degree"] += 1
 
     
     # 标记文档状态为已处理（即在图中可见）
@@ -483,24 +562,27 @@ async def get_document_graph(
     except Exception:
         # best-effort，不阻塞图谱返回
         pass
-
-    # Create response with cleaned properties (convert DateTime to ISO strings)
-    response_nodes = [
-        Node(id=node.id, labels=node.labels, properties=_clean_properties(node.properties))
-        for node in nodes_dict.values()
-    ]
     
-    response_edges = [
-        Edge(id=edge.id, source=edge.source, target=edge.target, type=edge.type, 
-             properties=_clean_properties(edge.properties))
-        for edge in edges
-    ]
+    # Prepare response - return raw dict format matching /graph/visualize endpoint
+    response_nodes = list(nodes_dict.values())
+    
+    # Clean edge properties
+    response_edges = []
+    for edge in edges:
+        response_edges.append({
+            "id": edge["id"],
+            "source": str(edge["source"]),
+            "target": str(edge["target"]),
+            "type": edge["type"],
+            "label": edge["label"],
+            "properties": _clean_properties(edge.get("properties", {}))
+        })
 
-    return GraphResponse(
-        nodes=response_nodes,
-        edges=response_edges,
-        stats={"count": len(response_nodes), "edges": len(response_edges)}
-    )
+    return {
+        "nodes": response_nodes,
+        "edges": response_edges,
+        "stats": {"count": len(response_nodes), "edges": len(response_edges)}
+    }
 
 
 @router.get("/concepts/{concept_name}/graph", response_model=GraphResponse)
@@ -570,37 +652,65 @@ async def get_concept_graph(
                 node_id = getattr(node, "element_id", None) or str(getattr(node, "id", hash(str(node))))
             
             if node_id not in nodes_dict:
-                nodes_dict[node_id] = Node(
-                    id=str(node_id),
-                    labels=labels,
-                    properties=neo4j_client._convert_neo4j_types(props)
-                )
+                nodes_dict[node_id] = {
+                    "id": str(node_id),
+                    "labels": labels,
+                    "type": labels[0] if labels else "Unknown",
+                    "label": props.get("name") or props.get("filename") or node_id,
+                    "properties": neo4j_client._convert_neo4j_types(props),
+                    "degree": 0
+                }
         
         # Add relationships
         if "rels" in record and record["rels"]:
             for rel in record["rels"]:
                 if hasattr(rel, "start_node") and hasattr(rel, "end_node"):
-                    # Get source ID
+                    # Get source ID - use same logic as node ID generation
                     start_props = dict(rel.start_node) if hasattr(rel.start_node, "__getitem__") else {}
                     source_id = start_props.get("id") or start_props.get("name")
                     if not source_id:
                         source_id = getattr(rel.start_node, "element_id", None) or str(getattr(rel.start_node, "id", hash(str(rel.start_node))))
                     
-                    # Get target ID
+                    # Get target ID - use same logic as node ID generation
                     end_props = dict(rel.end_node) if hasattr(rel.end_node, "__getitem__") else {}
                     target_id = end_props.get("id") or end_props.get("name")
                     if not target_id:
                         target_id = getattr(rel.end_node, "element_id", None) or str(getattr(rel.end_node, "id", hash(str(rel.end_node))))
                     
+                    # Convert to string
+                    source_id = str(source_id)
+                    target_id = str(target_id)
+                    
+                    # 从nodes_dict中查找正确的节点ID（处理ID不匹配的情况）
+                    final_source_id = source_id
+                    final_target_id = target_id
+                    
+                    for node_id in nodes_dict:
+                        node = nodes_dict[node_id]
+                        node_props = node.get("properties", {})
+                        # 匹配条件：节点属性中的id或name与source/target匹配
+                        if (node_props.get("id") == source_id or 
+                            node_props.get("name") == source_id or
+                            str(node.get("id")) == source_id or
+                            str(node.get("label")) == source_id):
+                            final_source_id = node_id
+                        if (node_props.get("id") == target_id or 
+                            node_props.get("name") == target_id or
+                            str(node.get("id")) == target_id or
+                            str(node.get("label")) == target_id):
+                            final_target_id = node_id
+                    
                     rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
                     rel_props = dict(rel) if hasattr(rel, "__getitem__") else {}
                     
-                    edges.append(Edge(
-                        source=str(source_id),
-                        target=str(target_id),
-                        type=rel_type,
-                        properties=neo4j_client._convert_neo4j_types(rel_props)
-                    ))
+                    edges.append({
+                        "id": f"{final_source_id}_{rel_type}_{final_target_id}",
+                        "source": final_source_id,
+                        "target": final_target_id,
+                        "type": rel_type,
+                        "label": rel_type,
+                        "properties": neo4j_client._convert_neo4j_types(rel_props)
+                    })
     
     # Create response with cleaned properties
     response_nodes = [

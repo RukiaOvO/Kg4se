@@ -737,6 +737,31 @@ def process_document_background(
             if all_insights:
                 result_data["insights"] = all_insights[:10]  # 返回前10条洞察
             
+            # 更新Neo4j中的文档统计信息
+            try:
+                neo4j_client.execute_query("""
+                    MATCH (d:Document {id: $doc_id})
+                    SET d.stats = $stats,
+                        d.chunk_count = $chunk_count,
+                        d.claim_count = $claim_count,
+                        d.concept_count = $concept_count,
+                        d.text_length = $text_length,
+                        d.processing_status = "completed",
+                        d.processed_at = datetime(),
+                        d.updated_at = datetime()
+                    RETURN d
+                """, {
+                    "doc_id": doc_id,
+                    "stats": json.dumps(stats),
+                    "chunk_count": len(chunks),
+                    "claim_count": len(linked_triplets),
+                    "concept_count": len(concept_names),
+                    "text_length": len(full_text)
+                })
+                print(f"✅ [Neo4j统计更新] 文档统计信息已保存到数据库")
+            except Exception as e:
+                print(f"⚠️  Neo4j统计更新失败: {e}")
+            
             _update_upload_status(job_id, "completed", 100, "AI智能分析完成！", documentId=doc_id, **result_data)
         
         else:
@@ -800,7 +825,7 @@ def process_document_background(
                     MATCH (d:Document {id: $doc_id})
                     SET d.stats = $stats,
                         d.chunk_count = $chunk_count,
-                        d.triplet_count = $triplet_count,
+                        d.claim_count = $claim_count,
                         d.concept_count = $concept_count,
                         d.text_length = $text_length,
                         d.processing_status = "completed",
@@ -811,7 +836,7 @@ def process_document_background(
                     "doc_id": doc_id,
                     "stats": json.dumps(stats),
                     "chunk_count": len(chunks),
-                    "triplet_count": len(linked_triplets),
+                    "claim_count": len(linked_triplets),
                     "concept_count": len(concept_names),
                     "text_length": len(full_text)
                 })

@@ -8,6 +8,11 @@ from dotenv import load_dotenv
 # 在导入其他模块之前加载 .env 文件
 load_dotenv()
 
+# 初始化日志系统（必须在其他模块导入之前）
+from utils.logger import setup_logging, get_logger
+setup_logging()
+logger = get_logger("main")
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,64 +25,64 @@ from config.instances import initialize_instances
 # 验证配置
 config_errors = config_settings.validate()
 if config_errors:
-    print("=== 配置验证失败 ===")
+    logger.error("=== 配置验证失败 ===")
     for error in config_errors:
-        print(f"❌ {error}")
-    print("=" * 50)
+        logger.error(f"❌ {error}")
+    logger.error("=" * 50)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup and shutdown events."""
-    print("\n=== 服务启动 ===")
+    logger.info("\n=== 服务启动 ===")
     
     # Startup: Initialize all instances
     try:
         initialize_instances()
-        print("✅ All instances initialized successfully")
+        logger.info("✅ All instances initialized successfully")
     except Exception as e:
-        print(f"⚠️  Failed to initialize instances: {e}")
+        logger.warning(f"⚠️  Failed to initialize instances: {e}")
     
     # Startup: Initialize Neo4j connection
     try:
         neo4j_client.initialize()
-        print("✅ Neo4j client initialized successfully")
+        logger.info("✅ Neo4j client initialized successfully")
     except Exception as e:
-        print(f"⚠️  Failed to initialize Neo4j client: {e}")
-        print("   The API will start but database operations will fail.")
+        logger.warning(f"⚠️  Failed to initialize Neo4j client: {e}")
+        logger.warning("   The API will start but database operations will fail.")
     
     # Startup: Initialize FAISS
     if config_settings.faiss_enabled:
         try:
             faiss_store.load_index()
-            print(f"✅ FAISS index loaded from {config_settings.faiss_index_path}")
+            logger.info(f"✅ FAISS index loaded from {config_settings.faiss_index_path}")
         except Exception as e:
-            print(f"⚠️  FAISS index not found or failed to load: {e}")
-            print("   Starting with empty FAISS index")
+            logger.warning(f"⚠️  FAISS index not found or failed to load: {e}")
+            logger.warning("   Starting with empty FAISS index")
     
     # 打印配置摘要
-    print(f"\n=== 配置摘要 ===")
-    print(f"AI Provider: {config_settings.ai_provider}")
-    print(f"Embedding Model: {config_settings.embedding_model}")
-    print(f"FAISS Enabled: {config_settings.faiss_enabled}")
-    print(f"Debug Mode: {config_settings.debug_mode}")
+    logger.info(f"\n=== 配置摘要 ===")
+    logger.info(f"AI Provider: {config_settings.ai_provider}")
+    logger.info(f"Embedding Model: {config_settings.embedding_model}")
+    logger.info(f"FAISS Enabled: {config_settings.faiss_enabled}")
+    logger.info(f"Debug Mode: {config_settings.debug_mode}")
     
     yield
     
     # Shutdown: Close connections
-    print("\n=== 服务关闭 ===")
+    logger.info("\n=== 服务关闭 ===")
     
     if neo4j_client.driver:
         neo4j_client.close()
-        print("✅ Neo4j client closed")
+        logger.info("✅ Neo4j client closed")
     
     # Shutdown: Save FAISS index
     if config_settings.faiss_enabled:
         try:
             faiss_store.save_index()
-            print("✅ FAISS index saved")
+            logger.info("✅ FAISS index saved")
         except Exception as e:
-            print(f"⚠️  Failed to save FAISS index: {e}")
+            logger.warning(f"⚠️  Failed to save FAISS index: {e}")
 
 
 # Create FastAPI app

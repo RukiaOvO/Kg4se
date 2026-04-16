@@ -4,6 +4,9 @@ from typing import List, Dict, Any, Optional
 from infra.ai_providers import AIProviderFactory, BaseAIClient
 from models.document import Chunk, Triplet
 from services.config_service import config_service
+from utils.logger import get_logger
+
+logger = get_logger("services.ai_segmenter")
 
 
 class AISegmenter:
@@ -39,7 +42,7 @@ class AISegmenter:
             # 获取提供商名称用于显示
             provider_info = AIProviderFactory.get_provider_info(self.provider)
             provider_name = provider_info.get("name", self.provider)
-            print(f"AI Segmenter initialized with {provider_name} (model: {self.model})")
+            logger.info(f"AI Segmenter initialized with {provider_name} (model: {self.model})")
             
         except ValueError as e:
             raise ValueError(f"Failed to initialize AI segmenter: {str(e)}")
@@ -80,14 +83,14 @@ class AISegmenter:
             )
             
             optimized = response_text.strip()
-            print(f"\n🔧 [Prompt优化]")
-            print(f"   原始: {user_prompt[:100]}...")
-            print(f"   优化: {optimized[:100]}...")
+            logger.debug(f"[Prompt Optimization]")
+            logger.debug(f"   Original: {user_prompt[:100]}...")
+            logger.debug(f"   Optimized: {optimized[:100]}...")
             
             return optimized
             
         except Exception as e:
-            print(f"⚠️  Prompt优化失败，使用原始Prompt: {str(e)}")
+            logger.warning(f"Prompt optimization failed, using original prompt: {str(e)}")
             return user_prompt
     
     def analyze_document_structure(
@@ -140,7 +143,7 @@ class AISegmenter:
             return result
             
         except Exception as e:
-            print(f"⚠️  文档结构分析失败: {str(e)}")
+            logger.warning(f"Document structure analysis failed: {str(e)}")
             return {
                 "themes": [],
                 "domains": [],
@@ -251,7 +254,7 @@ class AISegmenter:
             }
             
         except Exception as e:
-            print(f"⚠️  知识提取失败: {str(e)}")
+            logger.warning(f"Knowledge extraction failed: {str(e)}")
             return {
                 "concepts": [],
                 "triplets": [],

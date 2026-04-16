@@ -549,17 +549,38 @@ const loadGraph = async () => {
           // Determine node class for styling
           // Prioritize known types: Concept, Document, Entity
           let nodeClass = 'Unknown'
-          if (nodeLabels.includes('Concept') || nodeType === 'Concept') {
+          
+          // 增强类型识别：收集所有可能的类型提示
+          const typeLower = (nodeType || '').toLowerCase()
+          const allHints = [
+            nodeType, 
+            ...nodeLabels, 
+            node.label, 
+            node.properties?.name,
+            node.properties?.type
+          ].filter(Boolean).map(h => String(h).toLowerCase())
+          
+          const hasConceptHint = allHints.some(h => h.includes('concept'))
+          const hasEntityHint = allHints.some(h => h.includes('entity'))
+          const hasDocumentHint = allHints.some(h => h.includes('document'))
+          
+          // 优先级：Concept > Document > Entity > Unknown
+          if (hasConceptHint || typeLower === 'concept') {
             nodeClass = 'Concept'
-          } else if (
-            nodeLabels.includes('Document') || 
-            nodeType === 'Document' ||
-            hasFilename ||
-            hasDocType
-          ) {
+          } else if (hasDocumentHint || typeLower === 'document' || hasFilename || hasDocType) {
             nodeClass = 'Document'
-          } else if (nodeLabels.includes('Entity') || nodeType === 'Entity') {
+          } else if (hasEntityHint || typeLower === 'entity') {
             nodeClass = 'Entity'
+          } else {
+            // 如果都不匹配，尝试从 properties.type 获取类型
+            const propType = (node.properties?.type || '').toLowerCase()
+            if (propType.includes('concept')) {
+              nodeClass = 'Concept'
+            } else if (propType.includes('entity')) {
+              nodeClass = 'Entity'
+            } else if (propType.includes('document')) {
+              nodeClass = 'Document'
+            }
           }
           
           return {

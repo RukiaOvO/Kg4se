@@ -3,7 +3,9 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from services.qa_service import qa_service
+from utils.logger import get_logger
 
+logger = get_logger("routes.qa")
 
 # Request/Response models
 class Message(BaseModel):
@@ -95,7 +97,7 @@ async def ask_question(request: AskRequest) -> AskResponse:
     except HTTPException:
         raise
     except Exception as e:
-        print(f"❌ [API] 问答请求失败: {e}")
+        logger.error(f"❌ [API] 问答请求失败: {e}")
         raise HTTPException(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
@@ -142,7 +144,6 @@ async def submit_feedback(feedback: FeedbackRequest):
         操作结果
     """
     try:
-        # 验证评分范围
         if feedback.rating < 1 or feedback.rating > 5:
             raise HTTPException(status_code=400, detail="评分必须在1-5之间")
 

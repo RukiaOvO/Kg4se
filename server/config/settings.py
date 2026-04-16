@@ -7,6 +7,7 @@
 """
 
 import os
+import warnings
 from typing import Optional, Literal, List, Dict, Any
 from pydantic_settings import BaseSettings
 
@@ -16,6 +17,12 @@ class Settings(BaseSettings):
     项目配置类
     
     所有配置项都从环境变量读取，提供合理的默认值
+    
+    配置组织原则：
+    - 使用统一的命名规范（小写+下划线）
+    - 按功能模块分组配置
+    - 移除重复配置项
+    - 保留必要的向后兼容性
     """
     
     # ============================================
@@ -37,7 +44,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     
     # ============================================
-    # AI 配置
+    # AI 配置（统一配置）
     # ============================================
     
     ai_provider: Literal[
@@ -56,8 +63,8 @@ class Settings(BaseSettings):
     # 嵌入模型配置
     # ============================================
     
-    embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-v3")
-    embedding_dimension: int = int(os.getenv("EMBEDDING_DIMENSION", "1536"))
+    embedding_model: str = "text-embedding-v3"
+    embedding_dimension: int = 1536
     embedding_api_key: Optional[str] = None
     embedding_base_url: Optional[str] = None
     
@@ -91,17 +98,11 @@ class Settings(BaseSettings):
     upload_dir: str = "./uploads"
     
     # ============================================
-    # GraphRAG 功能开关 (v2.0)
+    # GraphRAG 功能开关
     # ============================================
     
     enable_neo4j_graphrag: bool = True
     enable_vector_search: bool = True
-    
-    # ============================================
-    # 模型配置
-    # ============================================
-    
-    llm_model: str = "qwen-plus"
     
     # ============================================
     # 本体约束配置
@@ -153,7 +154,7 @@ class Settings(BaseSettings):
     build_version_prefix: str = "v2.0"
     
     # ============================================
-    # 兼容性配置（旧版本）
+    # 兼容性配置（已弃用，保留向后兼容）
     # ============================================
     
     openai_api_key: Optional[str] = None
@@ -173,6 +174,9 @@ class Settings(BaseSettings):
     @classmethod
     def from_env(cls):
         """从环境变量加载配置"""
+        # 检查弃用的环境变量
+        cls._check_deprecated_env_vars()
+        
         return cls(
             # 基础配置
             debug_mode=cls._get_bool("DEBUG", False),
@@ -185,19 +189,19 @@ class Settings(BaseSettings):
             neo4j_password=os.getenv("NEO4J_PASSWORD", "neo4j1234"),
             redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
             
-            # AI 配置
+            # AI 配置（优先使用统一配置，兼容旧配置）
             ai_provider=os.getenv("AI_PROVIDER", "mock"),
-            ai_api_key=os.getenv("AI_API_KEY") or os.getenv("OPENAI_API_KEY"),
-            ai_model=os.getenv("AI_MODEL"),
-            ai_base_url=os.getenv("AI_BASE_URL") or os.getenv("OPENAI_BASE_URL"),
+            ai_api_key=cls._get_ai_api_key(),
+            ai_model=cls._get_ai_model(),
+            ai_base_url=cls._get_ai_base_url(),
             ai_temperature=float(os.getenv("AI_TEMPERATURE", "0.3")),
             ai_max_tokens=int(os.getenv("AI_MAX_TOKENS", "4096")),
             
-            # 嵌入模型配置
+            # 嵌入模型配置（兼容旧配置）
             embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-v3"),
             embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "1536")),
-            embedding_api_key=os.getenv("EMBEDDING_API_KEY") or os.getenv("AI_API_KEY") or os.getenv("OPENAI_API_KEY"),
-            embedding_base_url=os.getenv("EMBEDDING_BASE_URL") or os.getenv("AI_BASE_URL") or os.getenv("OPENAI_BASE_URL"),
+            embedding_api_key=cls._get_embedding_api_key(),
+            embedding_base_url=cls._get_embedding_base_url(),
             
             # FAISS 配置
             faiss_enabled=cls._get_bool("FAISS_ENABLED", True),
@@ -223,9 +227,6 @@ class Settings(BaseSettings):
             enable_neo4j_graphrag=cls._get_bool("ENABLE_NEO4J_GRAPHRAG", True),
             enable_vector_search=cls._get_bool("ENABLE_VECTOR_SEARCH", True),
             
-            # 模型配置
-            llm_model=os.getenv("LLM_MODEL", "qwen-plus"),
-            
             # 阈值配置
             entity_link_accept_threshold=float(os.getenv("ENTITY_LINK_ACCEPT_THRESHOLD", "0.85")),
             entity_link_review_threshold=float(os.getenv("ENTITY_LINK_REVIEW_THRESHOLD", "0.65")),
@@ -245,12 +246,75 @@ class Settings(BaseSettings):
             # 构建版本配置
             build_version_prefix=os.getenv("BUILD_VERSION_PREFIX", "v2.0"),
             
-            # 兼容性配置（旧版本）
+            # 兼容性配置（已弃用）
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
             openai_base_url=os.getenv("OPENAI_BASE_URL"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             ollama_model=os.getenv("OLLAMA_MODEL", "llama3")
+        )
+    
+    @staticmethod
+    def _check_deprecated_env_vars():
+        """检查并警告已弃用的环境变量"""
+        deprecated_vars = [
+            ("OPENAI_API_KEY", "AI_API_KEY"),
+            ("OPENAI_MODEL", "AI_MODEL"),
+            ("OPENAI_BASE_URL", "AI_BASE_URL"),
+            ("OLLAMA_BASE_URL", "AI_BASE_URL"),
+            ("OLLAMA_MODEL", "AI_MODEL"),
+        ]
+        
+        for old_var, new_var in deprecated_vars:
+            if os.getenv(old_var):
+                warnings.warn(
+                    f"环境变量 {old_var} 已弃用，请使用 {new_var} 代替",
+                    DeprecationWarning,
+                    stacklevel=2
+                )
+    
+    @staticmethod
+    def _get_ai_api_key() -> Optional[str]:
+        """获取 AI API Key（兼容旧配置）"""
+        return (
+            os.getenv("AI_API_KEY") or 
+            os.getenv("OPENAI_API_KEY")
+        )
+    
+    @staticmethod
+    def _get_ai_model() -> Optional[str]:
+        """获取 AI 模型（兼容旧配置）"""
+        return (
+            os.getenv("AI_MODEL") or 
+            os.getenv("OPENAI_MODEL") or
+            os.getenv("OLLAMA_MODEL")
+        )
+    
+    @staticmethod
+    def _get_ai_base_url() -> Optional[str]:
+        """获取 AI Base URL（兼容旧配置）"""
+        return (
+            os.getenv("AI_BASE_URL") or 
+            os.getenv("OPENAI_BASE_URL") or
+            os.getenv("OLLAMA_BASE_URL")
+        )
+    
+    @staticmethod
+    def _get_embedding_api_key() -> Optional[str]:
+        """获取嵌入模型 API Key（兼容旧配置）"""
+        return (
+            os.getenv("EMBEDDING_API_KEY") or
+            os.getenv("AI_API_KEY") or 
+            os.getenv("OPENAI_API_KEY")
+        )
+    
+    @staticmethod
+    def _get_embedding_base_url() -> Optional[str]:
+        """获取嵌入模型 Base URL（兼容旧配置）"""
+        return (
+            os.getenv("EMBEDDING_BASE_URL") or
+            os.getenv("AI_BASE_URL") or 
+            os.getenv("OPENAI_BASE_URL")
         )
     
     @staticmethod
@@ -304,8 +368,17 @@ class Settings(BaseSettings):
         return errors
     
     def to_dict(self) -> Dict[str, Any]:
-        """转换为字典"""
-        return {k: v for k, v in self.dict().items() if not k.startswith("_")}
+        """转换为字典（不包含私有属性和已弃用的配置）"""
+        result = {}
+        for k, v in self.dict().items():
+            if k.startswith("_"):
+                continue
+            # 不返回已弃用的配置项
+            if k in ["openai_api_key", "openai_model", "openai_base_url", 
+                     "ollama_base_url", "ollama_model"]:
+                continue
+            result[k] = v
+        return result
 
 
 # 全局配置实例

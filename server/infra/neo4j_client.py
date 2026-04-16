@@ -7,6 +7,9 @@ from typing import List, Dict, Any, Optional
 from neo4j import GraphDatabase, Driver
 from neo4j.exceptions import ServiceUnavailable
 from config import settings
+from utils.logger import get_logger
+
+logger = get_logger("infra.neo4j_client")
 
 
 class Neo4jClient:
@@ -40,7 +43,7 @@ class Neo4jClient:
                 # Verify connection by attempting a simple query
                 with self.driver.session() as session:
                     session.run("RETURN 1")
-                print(f"Neo4j connection established (attempt {attempt + 1})")
+                logger.info(f"Neo4j connection established (attempt {attempt + 1})")
                 return
             except (ServiceUnavailable, OSError, Exception) as e:
                 # 对于认证错误等非连接问题，直接抛出
@@ -50,7 +53,7 @@ class Neo4jClient:
                 
                 # 对于连接问题，进行重试
                 if attempt < max_retries - 1:
-                    print(f"Waiting for Neo4j Bolt to be ready... (attempt {attempt + 1}/{max_retries})")
+                    logger.info(f"Waiting for Neo4j Bolt to be ready... (attempt {attempt + 1}/{max_retries})")
                     time.sleep(retry_delay)
                 else:
                     raise ConnectionError(
@@ -124,11 +127,11 @@ class Neo4jClient:
                                 ]):
                                     continue
                                 # 对于语法错误，也打印警告但不中断初始化
-                                print(f"Warning: Failed to execute schema statement: {e}")
-                                print(f"Statement: {statement[:100]}...")
-                    print("Schema initialized from schema.cypher")
+                                logger.warning(f"Failed to execute schema statement: {e}")
+                                logger.debug(f"Statement: {statement[:100]}...")
+                    logger.info("Schema initialized from schema.cypher")
             except Exception as e:
-                print(f"Warning: Failed to load schema.cypher, falling back to inline schema: {e}")
+                logger.warning(f"Failed to load schema.cypher, falling back to inline schema: {e}")
                 self._initialize_schema_inline()
         else:
             # 后备方案：使用内联 Schema（向后兼容）
@@ -316,6 +319,10 @@ class Neo4jClient:
             d.mime = $mime,
             d.source_id = $source_id,
             d.meta = $meta_json,
+            d.processing_status = coalesce(d.processing_status, "pending"),
+            d.chunk_count = coalesce(d.chunk_count, 0),
+            d.claim_count = coalesce(d.claim_count, 0),
+            d.concept_count = coalesce(d.concept_count, 0),
             d.created_at = coalesce(d.created_at, datetime()),
             d.updated_at = datetime()
         RETURN d

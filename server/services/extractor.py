@@ -5,6 +5,9 @@ from infra.ai_providers import AIProviderFactory, BaseAIClient
 from models.document import Triplet, Chunk
 from services.config_service import config_service
 from prompts import PromptManager
+from utils.logger import get_logger
+
+logger = get_logger("services.extractor")
 
 
 class TripletExtractor:
@@ -17,18 +20,15 @@ class TripletExtractor:
         self.prompt_manager = PromptManager()
 
         try:
-            # 从数据库读取运行时配置
             ai_config = config_service.get_ai_provider_config()
             self.provider = ai_config["provider"]
             api_key = ai_config["api_key"]
             model = ai_config["model"]
             base_url = ai_config["base_url"]
 
-            # Mock 模式不需要 API key
             if self.provider == "mock":
                 api_key = api_key or "mock"
 
-            # 创建AI客户端
             self.client = AIProviderFactory.create_client(
                 provider=self.provider,
                 api_key=api_key,
@@ -37,7 +37,6 @@ class TripletExtractor:
             )
             self.model = self.client.model
 
-            # 获取提供商名称用于显示
             provider_names = {
                 "openai": "OpenAI GPT",
                 "anthropic": "Anthropic Claude",
@@ -55,23 +54,22 @@ class TripletExtractor:
             provider_name = provider_names.get(self.provider, self.provider)
 
             if self.provider != "mock":
-                print(f"使用 {provider_name}，模型: {self.model}")
+                logger.info(f"使用 {provider_name}，模型: {self.model}")
             else:
-                print("使用 Mock 模式进行三元组提取")
+                logger.info("使用 Mock 模式进行三元组提取")
 
         except ValueError as e:
-            print(f"警告: AI 配置错误 ({e})，将使用 mock 模式")
+            logger.warning(f"警告: AI 配置错误 ({e})，将使用 mock 模式")
             self.provider = "mock"
             self.client = AIProviderFactory.create_client("mock")
             self.model = "mock"
         except (ConnectionError, TimeoutError, RuntimeError) as e:
-            print(f"警告: 无法初始化 AI 客户端 ({e})，将使用 mock 模式")
+            logger.warning(f"警告: 无法初始化 AI 客户端 ({e})，将使用 mock 模式")
             self.provider = "mock"
             self.client = AIProviderFactory.create_client("mock")
             self.model = "mock"
         except Exception as e:
-            # 捕获其他未预期的异常，但不暴露详细信息
-            print(f"警告: AI 客户端初始化时发生未知错误，将使用 mock 模式")
+            logger.warning(f"警告: AI 客户端初始化时发生未知错误，将使用 mock 模式")
             self.provider = "mock"
             self.client = AIProviderFactory.create_client("mock")
             self.model = "mock"
@@ -86,23 +84,21 @@ class TripletExtractor:
         Returns:
             List of Triplet objects
         """
-        print(f"\n{'='*80}")
-        print(f"[知识抽取] 开始处理文本块 (chunk_id: {chunk.chunk_id})")
-        print(f"文本长度: {len(chunk.text)} 字符")
-        print(f"文本预览: {chunk.text[:200]}...")
+        logger.info(f"\n{'='*80}")
+        logger.info(f"[知识抽取] 开始处理文本块 (chunk_id: {chunk.chunk_id})")
+        logger.info(f"文本长度: {len(chunk.text)} 字符")
+        logger.info(f"文本预览: {chunk.text[:200]}...")
         
-        # 检查是否为多模态内容
         chunk_type = chunk.meta.get("type", "text")
         if chunk_type != "text":
-            print(f"[知识抽取] 检测到多模态内容类型: {chunk_type}")
+            logger.info(f"[知识抽取] 检测到多模态内容类型: {chunk_type}")
 
         if not self.client or self.provider == "mock":
-            print(f"[知识抽取] 使用 Mock 模式（未配置 AI 服务）")
+            logger.info(f"[知识抽取] 使用 Mock 模式（未配置 AI 服务）")
             result = self._mock_extract(chunk)
-            print(f"[知识抽取] Mock 模式提取结果: {len(result)} 个三元组")
+            logger.info(f"[知识抽取] Mock 模式提取结果: {len(result)} 个三元组")
             return result
 
-        # 根据内容类型选择不同的 prompt
         if chunk_type == "table":
             prompt = self.prompt_manager.render(
                 "triplet_extraction", "table",
@@ -136,16 +132,15 @@ class TripletExtractor:
         else:
             prompt = self.prompt_manager.render("triplet_extraction", "text", text=chunk.text)
         
-        # 如果 Prompt 加载失败，使用默认硬编码 Prompt（向后兼容）
         if not prompt:
-            print(f"[知识抽取] Prompt 文件加载失败，使用默认 Prompt")
+            logger.info(f"[知识抽取] Prompt 文件加载失败，使用默认 Prompt")
             prompt = self._build_prompt(chunk.text)
         
         raw_content = None
 
         try:
-            print(f"[AI请求] Provider: {self.provider}, Model: {self.model}")
-            print(f"[AI请求] 发送请求到 AI 服务...")
+            logger.info(f"[AI请求] Provider: {self.provider}, Model: {self.model}")
+            logger.info(f"[AI请求] 发送请求到 AI 服务...")
 
             messages = [
                 {
@@ -163,19 +158,18 @@ class TripletExtractor:
                 temperature=0.3,
                 json_mode=True
             )
-            print(f"[AI响应] 收到响应，长度: {len(raw_content)} 字符")
-            print(f"[AI响应] 原始内容预览: {raw_content[:500]}...")
+            logger.info(f"[AI响应] 收到响应，长度: {len(raw_content)} 字符")
+            logger.debug(f"[AI响应] 原始内容预览: {raw_content[:500]}...")
 
             result = json.loads(raw_content)
             raw_triplets = result.get("triplets", [])
-            print(f"[AI响应] 解析到原始三元组数量: {len(raw_triplets)}")
+            logger.info(f"[AI响应] 解析到原始三元组数量: {len(raw_triplets)}")
 
             for idx, t in enumerate(raw_triplets[:5], 1):
-                print(f"   [{idx}] {t.get('subject', 'N/A')} - {t.get('predicate', 'N/A')} - {t.get('object', 'N/A')} (置信度: {t.get('confidence', 0)})")
+                logger.debug(f"   [{idx}] {t.get('subject', 'N/A')} - {t.get('predicate', 'N/A')} - {t.get('object', 'N/A')} (置信度: {t.get('confidence', 0)})")
             if len(raw_triplets) > 5:
-                print(f"   ... 还有 {len(raw_triplets) - 5} 个三元组")
+                logger.debug(f"   ... 还有 {len(raw_triplets) - 5} 个三元组")
 
-            # 构建证据信息（包含多模态元数据）
             evidence = {
                 "docId": chunk.doc_id,
                 "chunkId": chunk.chunk_id,
@@ -185,7 +179,6 @@ class TripletExtractor:
                 "chunkType": chunk_type
             }
             
-            # 添加多模态特定的元数据
             if chunk_type == "table":
                 evidence["rows"] = chunk.meta.get("rows")
                 evidence["cols"] = chunk.meta.get("cols")
@@ -213,21 +206,21 @@ class TripletExtractor:
 
             filtered_count = len(raw_triplets) - len(triplets)
             if filtered_count > 0:
-                print(f"[过滤] 过滤掉 {filtered_count} 个无效三元组（缺少必要字段）")
+                logger.info(f"[过滤] 过滤掉 {filtered_count} 个无效三元组（缺少必要字段）")
 
-            print(f"[知识抽取] 成功提取 {len(triplets)} 个有效三元组")
-            print(f"{'='*80}\n")
+            logger.info(f"[知识抽取] 成功提取 {len(triplets)} 个有效三元组")
+            logger.info(f"{'='*80}\n")
 
             return triplets
         except json.JSONDecodeError as e:
-            print(f"[知识抽取] JSON 解析错误: {e}")
+            logger.error(f"[知识抽取] JSON 解析错误: {e}")
             if raw_content:
-                print(f"[AI响应] 原始响应内容: {raw_content[:1000]}")
+                logger.debug(f"[AI响应] 原始响应内容: {raw_content[:1000]}")
             return []
         except Exception as e:
-            print(f"[知识抽取] 提取失败: {e}")
+            logger.error(f"[知识抽取] 提取失败: {e}")
             import traceback
-            print(f"[错误详情] {traceback.format_exc()}")
+            logger.debug(f"[错误详情] {traceback.format_exc()}")
             return []
 
     def _build_prompt(self, text: str) -> str:
@@ -511,7 +504,6 @@ Return ONLY the JSON object, no other explanatory text.
         import re
         
         if chunk_type == "table":
-            # 表格 Mock 提取：查找表格中的关系
             row_pattern = re.compile(r'\|([^|]+)\|([^|]+)\|')
             for match in row_pattern.finditer(text):
                 subject = match.group(1).strip()
@@ -535,7 +527,6 @@ Return ONLY the JSON object, no other explanatory text.
                     ))
         
         elif chunk_type == "figure":
-            # 图表 Mock 提取
             caption = chunk.meta.get("caption", "")
             if caption:
                 triplets.append(Triplet(
@@ -555,10 +546,8 @@ Return ONLY the JSON object, no other explanatory text.
                 ))
         
         elif chunk_type == "equation":
-            # 公式 Mock 提取
             latex = chunk.meta.get("latex", text)
             if latex:
-                # 提取变量
                 vars_pattern = re.compile(r'\\?([a-zA-Z]+)')
                 matches = vars_pattern.findall(latex)[:3]
                 for var in matches:
@@ -579,9 +568,7 @@ Return ONLY the JSON object, no other explanatory text.
                     ))
         
         elif chunk_type == "code":
-            # 代码 Mock 提取
             language = chunk.meta.get("language", "unknown")
-            # 查找函数定义
             func_pattern = re.compile(r'(def|function|class)\s+(\w+)')
             for match in func_pattern.finditer(text):
                 func_name = match.group(2).strip()
@@ -603,7 +590,6 @@ Return ONLY the JSON object, no other explanatory text.
                     ))
         
         else:
-            # 默认文本处理（原有逻辑）
             is_pattern = re.compile(r'([A-Z][a-zA-Z\s]+?)\s+is\s+(?:a\s+)?([a-zA-Z\s]+?)(?:\.|,|$)')
             for match in is_pattern.finditer(text):
                 triplets.append(Triplet(
