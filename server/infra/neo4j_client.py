@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from neo4j import GraphDatabase, Driver
 from neo4j.exceptions import ServiceUnavailable
-from infra.config import settings
+from config import settings
 
 
 class Neo4jClient:
@@ -35,7 +35,7 @@ class Neo4jClient:
             try:
                 self.driver = GraphDatabase.driver(
                     settings.neo4j_uri,
-                    auth=(settings.neo4j_user, settings.neo4j_pass)
+                    auth=(settings.neo4j_user, settings.neo4j_password)
                 )
                 # Verify connection by attempting a simple query
                 with self.driver.session() as session:

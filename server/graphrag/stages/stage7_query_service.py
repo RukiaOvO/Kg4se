@@ -2,14 +2,17 @@
 阶段 7: GraphRAG 检索 (Query Service) - P1 实现
 
 实现多路候选生成、图先验协同、限域生成
+支持三种问答模式：llm_only, rag, graphrag
 """
 
 import logging
-from typing import Dict, Any, List, Literal, Optional, Set, Tuple
+from typing import Dict, Any, List, Literal, Optional, Set, Tuple, Union
 from dataclasses import dataclass
 from collections import defaultdict
 
 from infra.neo4j_client import neo4j_client
+from infra.faiss_store import faiss_store
+from config import settings
 from graphrag.utils.embedding import get_embedding, cosine_similarity
 from graphrag.models.claim import Claim
 from graphrag.models.theme import Theme
@@ -50,22 +53,32 @@ class QueryService:
     GraphRAG 查询服务（P1 实现）
     
     实现多路候选生成 + 图先验协同 + 限域生成
+    支持三种问答模式：
+    - llm_only: 直接调用 LLM 回答
+    - rag: 仅使用向量检索（FAISS）
+    - graphrag: 图遍历 + 向量检索 + LLM 生成
     """
     
     def __init__(self):
         logger.info("QueryService initialized (P1)")
-        # 配置参数
-        self.max_hop = 2  # 图遍历最大跳数
-        self.theme_weight = 0.4  # 主题匹配权重
-        self.vector_weight = 0.3  # 向量检索权重
-        self.keyword_weight = 0.2  # 关键词匹配权重
-        self.graph_weight = 0.1  # 图遍历权重
-        self.similarity_threshold = 0.75  # 向量相似度阈值
+        # 配置参数（从 settings 读取）
+        self.max_hop = settings.graphrag_max_hop
+        self.theme_weight = settings.graphrag_theme_weight
+        self.vector_weight = settings.graphrag_vector_weight
+        self.keyword_weight = settings.graphrag_keyword_weight
+        self.graph_weight = settings.graphrag_graph_weight
+        self.similarity_threshold = settings.faiss_search_threshold if settings.faiss_enabled else 0.75
+        
+        # FAISS 配置
+        self.faiss_enabled = settings.faiss_enabled
+        self.faiss_top_k = settings.faiss_search_top_k
+        
+        logger.info(f"FAISS enabled: {self.faiss_enabled}")
         
     def answer(
         self,
         question: str,
-        mode: Literal["local", "global", "hybrid"] = "hybrid",
+        mode: Literal["llm_only", "rag", "graphrag", "local", "global", "hybrid"] = "graphrag",
         top_k: int = 5
     ) -> Dict[str, Any]:
         """
@@ -73,7 +86,10 @@ class QueryService:
         
         Args:
             question: 用户问题
-            mode: 查询模式
+            mode: 查询模式: llm_only | rag | graphrag | local | global | hybrid
+                  llm_only: 直接调用 LLM 回答
+                  rag: 仅使用向量检索
+                  graphrag/local/global/hybrid: GraphRAG 模式
             top_k: Top-K 结果数
         
         Returns:
@@ -81,13 +97,45 @@ class QueryService:
         """
         logger.info(f"开始回答问题: question={question}, mode={mode}")
         
+        # LLM Only 模式：直接返回通用回答
+        if mode == "llm_only":
+            answer = self._generate_llm_only_answer(question)
+            result = {
+                "answer": answer,
+                "cited_evidence_ids": [],
+                "relevant_themes": [],
+                "mode": "llm_only"
+            }
+            logger.info(f"LLM Only 回答完成: confidence={answer['confidence']:.3f}")
+            return result
+        
+        # RAG 模式：仅使用向量检索
+        if mode == "rag":
+            claim_candidates = self._retrieve_by_faiss(question, top_k * 3)
+            final_candidates = claim_candidates[:top_k]
+            answer = self._generate_answer(question, final_candidates)
+            relevant_themes = []
+            
+            result = {
+                "answer": answer,
+                "cited_evidence_ids": [c.claim_id for c in final_candidates],
+                "relevant_themes": relevant_themes,
+                "mode": "rag"
+            }
+            logger.info(f"RAG 回答完成: confidence={answer['confidence']:.3f}, "
+                       f"evidence_count={len(final_candidates)}")
+            return result
+        
+        # GraphRAG 模式（兼容旧模式名）
+        graph_mode = mode if mode in ["local", "global", "hybrid"] else "hybrid"
+        
         # 1. 多路候选生成
         claim_candidates, concept_candidates = self._multi_path_candidate_generation(
-            question, mode, top_k * 3  # 召回更多候选以便后续融合
+            question, graph_mode, top_k * 3  # 召回更多候选以便后续融合
         )
         
         # 2. 图先验协同（扩展证据链）
-        if mode in ["local", "hybrid"]:
+        if graph_mode in ["local", "hybrid"]:
             claim_candidates = self._graph_prior_collaboration(
                 claim_candidates, concept_candidates, max_hop=self.max_hop
             )
@@ -104,12 +152,38 @@ class QueryService:
         result = {
             "answer": answer,
             "cited_evidence_ids": [c.claim_id for c in final_candidates],
-            "relevant_themes": relevant_themes
+            "relevant_themes": relevant_themes,
+            "mode": "graphrag"
         }
         
-        logger.info(f"问题回答完成: confidence={answer['confidence']:.3f}, "
+        logger.info(f"GraphRAG 回答完成: confidence={answer['confidence']:.3f}, "
                    f"evidence_count={len(final_candidates)}")
         return result
+    
+    def _generate_llm_only_answer(self, question: str) -> Dict[str, Any]:
+        """
+        LLM Only 模式：直接生成回答（模拟）
+        
+        在实际实现中，这里会调用真实的 LLM API
+        """
+        logger.info("Generating LLM-only answer")
+        
+        # 模拟 LLM 回答（实际实现中应调用真实 LLM）
+        mock_answers = {
+            "什么是软件测试？": "软件测试是一种评估软件系统或应用程序的过程，目的是发现其中的缺陷或错误，确保软件满足预期的功能和性能要求。",
+            "什么是敏捷开发？": "敏捷开发是一种以人为核心、迭代、循序渐进的开发方法，强调快速响应变化和持续交付有价值的软件。",
+            "什么是单元测试？": "单元测试是对软件中的最小可测试单元进行验证的过程，通常是对单个函数或方法的测试。"
+        }
+        
+        conclusion = mock_answers.get(question, 
+            f"这是一个关于「{question}」的问题。在实际系统中，此模式会直接调用 LLM 生成回答，不依赖知识库。")
+        
+        return {
+            "conclusion": conclusion,
+            "reasoning_chain": [],
+            "confidence": 0.6,  # LLM 直接回答的置信度相对较低
+            "caveats": "此回答基于 LLM 预训练知识，可能存在幻觉风险"
+        }
     
     def _multi_path_candidate_generation(
         self,
@@ -288,13 +362,100 @@ class QueryService:
         
         return claims[:limit], concepts[:limit]
     
+    def _retrieve_by_faiss(self, question: str, limit: int) -> List[CandidateEvidence]:
+        """使用 FAISS 进行向量检索"""
+        claims = []
+        
+        if not self.faiss_enabled:
+            logger.warning("FAISS is not enabled, skipping FAISS retrieval")
+            return claims
+        
+        # 获取问题向量
+        question_embedding = get_embedding(question)
+        if not question_embedding or len(question_embedding) != 1536:
+            logger.warning("无法获取问题向量，跳过 FAISS 检索")
+            return claims
+        
+        # 使用 FAISS 检索
+        results = faiss_store.search(
+            question_embedding,
+            top_k=limit,
+            threshold=self.similarity_threshold
+        )
+        
+        for result in results:
+            metadata = result.metadata
+            item_type = metadata.get("type", "")
+            
+            if item_type == "claim":
+                claim = CandidateEvidence(
+                    claim_id=result.id,
+                    claim_text=metadata.get("text", ""),
+                    chunk_id=metadata.get("chunk_id", ""),
+                    doc_id=metadata.get("doc_id", ""),
+                    section_path=metadata.get("section_path"),
+                    evidence_span=None,
+                    score=result.similarity,
+                    source="faiss",
+                    confidence=metadata.get("confidence", 0.5),
+                    claim_type=metadata.get("claim_type", "fact")
+                )
+                claims.append(claim)
+            elif item_type == "chunk":
+                # 将 chunk 也作为候选证据
+                claim = CandidateEvidence(
+                    claim_id=result.id,
+                    claim_text=metadata.get("text", ""),
+                    chunk_id=result.id,
+                    doc_id=metadata.get("doc_id", ""),
+                    section_path=metadata.get("section_path"),
+                    evidence_span=None,
+                    score=result.similarity * 0.8,  # chunk 权重稍低
+                    source="faiss_chunk",
+                    confidence=0.6,
+                    claim_type="context"
+                )
+                claims.append(claim)
+        
+        logger.info(f"FAISS 检索完成: {len(claims)} candidates found")
+        return claims
+        
     def _retrieve_by_vector(
         self, question: str, limit: int
     ) -> Tuple[List[CandidateEvidence], List[ConceptCandidate]]:
-        """向量检索"""
+        """向量检索（使用 Neo4j 向量索引作为后备）"""
         claims = []
         concepts = []
         
+        # 如果 FAISS 可用，优先使用 FAISS
+        if self.faiss_enabled:
+            faiss_claims = self._retrieve_by_faiss(question, limit)
+            claims.extend(faiss_claims)
+            
+            # 同时从 FAISS 获取概念
+            question_embedding = get_embedding(question)
+            if question_embedding and len(question_embedding) == 1536:
+                results = faiss_store.search(
+                    question_embedding,
+                    top_k=limit,
+                    threshold=self.similarity_threshold
+                )
+                for result in results:
+                    metadata = result.metadata
+                    if metadata.get("type") == "concept":
+                        concept_name = metadata.get("name", result.id)
+                        concept = ConceptCandidate(
+                            concept_id=result.id,
+                            concept_name=concept_name,
+                            domain=metadata.get("domain"),
+                            score=result.similarity,
+                            source="faiss"
+                        )
+                        concepts.append(concept)
+            
+            return claims[:limit], concepts[:limit]
+        
+        # 后备方案：使用 Neo4j 向量索引
         # 获取问题向量
         question_embedding = get_embedding(question)
         if not question_embedding or len(question_embedding) != 1536:

@@ -79,10 +79,10 @@ class TestAIProviders:
     @pytest.mark.ai
     def test_ai_client_initialization(self):
         """测试 AI 客户端初始化"""
-        from infra.ai_providers import get_ai_client
+        from infra.ai_providers import AIProviderFactory
         
         try:
-            client = get_ai_client()
+            client = AIProviderFactory.create_client("mock")
             assert client is not None
         except Exception as e:
             pytest.skip(f"AI 客户端初始化失败: {e}")
@@ -92,10 +92,10 @@ class TestAIProviders:
     @pytest.mark.asyncio
     async def test_embedding_generation(self):
         """测试生成向量嵌入"""
-        from infra.ai_providers import get_ai_client
+        from infra.ai_providers import AIProviderFactory
         
         try:
-            client = get_ai_client()
+            client = AIProviderFactory.create_client("mock")
             embedding = await client.embed("测试文本")
             
             assert embedding is not None

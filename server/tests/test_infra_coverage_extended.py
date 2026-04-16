@@ -41,10 +41,9 @@ class TestAIProvidersExtended:
     def test_ai_client_get(self):
         """测试获取AI客户端"""
         try:
-            from infra.ai_providers import get_ai_client
-            client = get_ai_client()
-            # 客户端可能为None或某个对象
-            assert client is not None or client is None
+            from infra.ai_providers import AIProviderFactory
+            client = AIProviderFactory.create_client("mock")
+            assert client is not None
         except Exception:
             pytest.skip("AI client initialization failed")
 

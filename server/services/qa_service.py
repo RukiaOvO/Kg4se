@@ -2,8 +2,8 @@
 import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from infra.config import Settings
-from infra.ai_providers import get_ai_client
+from config import settings
+from infra.ai_providers import AIProviderFactory
 from infra.neo4j_client import neo4j_client
 
 
@@ -11,14 +11,14 @@ class QAService:
     """Service for intelligent Q&A using Neo4j knowledge graph."""
     
     def __init__(self):
-        self.settings = Settings()
+        self.settings = settings
         self.ai_client = self._initialize_ai_client()
         self.context_limit = 2000  # 字符限制
         
     def _initialize_ai_client(self):
         """Initialize AI client with configured provider."""
         try:
-            client = get_ai_client(
+            client = AIProviderFactory.create_client(
                 provider=self.settings.ai_provider,
                 api_key=self.settings.ai_api_key,
                 model=self.settings.ai_model,

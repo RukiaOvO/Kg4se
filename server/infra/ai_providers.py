@@ -579,99 +579,6 @@ class AIProviderFactory:
         ]
 
 
-def get_ai_client(
-    provider: str,
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
-    base_url: Optional[str] = None
-) -> Optional[BaseAIClient]:
-    """
-    Factory function to get AI client based on provider.
-    
-    Args:
-        provider: AI provider name (openai, qwen, anthropic, etc.)
-        api_key: API key for the provider
-        model: Model name (uses provider default if not specified)
-        base_url: Custom API base URL (optional)
-        
-    Returns:
-        AI client instance or None if mock mode
-    """
-    # Default models for each provider
-    default_models = {
-        "openai": "gpt-4o-mini",
-        "anthropic": "claude-3-sonnet-20240229",
-        "google": "gemini-1.5-pro",
-        "grok": "grok-2-1212",
-        "qwen": "qwen-max",
-        "glm": "glm-4",
-        "deepseek": "deepseek-chat",
-        "moonshot": "moonshot-v1-auto",
-        "ernie": "ernie-4.0-turbo-latest",
-        "minimax": "abab6.5s-chat",
-        "doubao": "doubao-pro-32k",
-        "ollama": "llama2",
-        "modelscope": "MiniMax/MiniMax-M2.5",
-        "nvidia": "MiniMax/MiniMax-M2.5",
-        "zhizengzeng": "qwen3-max",
-        "mock": "mock"
-    }
-    
-    # Use default model if not specified
-    if not model:
-        model = default_models.get(provider, "default")
-    
-    # Provider-specific client initialization
-    if provider == "openai":
-        if not api_key:
-            raise ValueError("OpenAI requires api_key")
-        return OpenAIClient(api_key=api_key, model=model, base_url=base_url)
-    
-    elif provider == "anthropic":
-        if not api_key:
-            raise ValueError("Anthropic Claude requires api_key")
-        return AnthropicClient(api_key=api_key, model=model, base_url=base_url)
-    
-    elif provider == "google":
-        if not api_key:
-            raise ValueError("Google Gemini requires api_key")
-        return GoogleGeminiClient(api_key=api_key, model=model, base_url=base_url)
-
-    elif provider == "google":
-        if not api_key:
-            raise ValueError("Google Gemini requires api_key")
-        return GoogleGeminiClient(api_key=api_key, model=model, base_url=base_url)
-    
-    elif provider in ["qwen", "glm", "deepseek", "moonshot", "ernie", "minimax", "doubao", "ollama", "modelscope", "zhizengzeng", "nvidia"]:
-        if provider != "ollama" and not api_key:
-            raise ValueError(f"{provider} requires api_key")
-        # All these use OpenAI-compatible interface
-        if not base_url:
-            # Default base URLs for common providers
-            base_urls = {
-                "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "glm": "https://open.bigmodel.cn/api/paas/v4",
-                "deepseek": "https://api.deepseek.com",
-                "moonshot": "https://api.moonshot.cn/v1",
-                "ernie": "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat",
-                "minimax": "https://api.minimaxi.chat/v1",
-                "doubao": "https://ark.cn-beijing.volces.com/api/v3",
-                "ollama": "http://localhost:11434/v1",
-                "modelscope": "https://api-inference.modelscope.cn/v1",
-                "nvidia": "https://integrate.api.nvidia.com/v1",
-                "zhizengzeng": "https://api.zhizengzeng.com/v1"
-            }
-            base_url = base_urls.get(provider)
-        return OpenAICompatibleClient(api_key=api_key or "dummy", model=model, base_url=base_url)
-    
-    elif provider == "mock":
-        # Mock client for testing - just returns predefined responses
-        return MockAIClient(model=model)
-    
-    else:
-        raise ValueError(f"Unsupported provider: {provider}")
-
-
 class MockAIClient(BaseAIClient):
     """Mock AI client for testing without API calls."""
     
@@ -719,3 +626,94 @@ class MockAIClient(BaseAIClient):
 您的问题是: {user_message[:100]}
 
 在实际应用中，这里会返回由AI模型生成的真实答案，同时配合知识图谱中的相关信息。"""
+
+
+# ============================================
+# AI 客户端单例管理器（避免重复初始化）
+# ============================================
+
+class AIClientSingleton:
+    """Singleton manager for AI clients to prevent duplicate initialization."""
+    
+    _instances = {}
+    _initialized = False
+    
+    @classmethod
+    def get_client(
+        cls,
+        provider: str,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None
+    ) -> Optional[BaseAIClient]:
+        """
+        Get or create a singleton AI client instance.
+        
+        Args:
+            provider: AI provider name
+            api_key: API key
+            model: Model name
+            base_url: Custom base URL
+            
+        Returns:
+            AI client instance (singleton)
+        """
+        # Create a unique key for this client configuration
+        key = f"{provider}_{model}_{base_url}"
+        
+        if key not in cls._instances:
+            # Create new client
+            client = AIProviderFactory.create_client(provider, api_key, model, base_url)
+            cls._instances[key] = client
+            print(f"[AI客户端单例] 创建新实例: {provider}")
+        else:
+            print(f"[AI客户端单例] 使用已有实例: {provider}")
+        
+        return cls._instances[key]
+    
+    @classmethod
+    def get_instance(
+        cls,
+        provider: str,
+        api_key: Optional[str] = None,
+        model: Optional[str] = None,
+        base_url: Optional[str] = None
+    ) -> Optional[BaseAIClient]:
+        """Alias for get_client."""
+        return cls.get_client(provider, api_key, model, base_url)
+    
+    @classmethod
+    def clear_all(cls):
+        """Clear all cached client instances."""
+        cls._instances = {}
+        print("[AI客户端单例] 已清除所有实例")
+    
+    @classmethod
+    def get_instance_count(cls) -> int:
+        """Get the number of cached client instances."""
+        return len(cls._instances)
+
+
+# Global convenience function for getting singleton AI client
+def get_singleton_ai_client(
+    provider: str,
+    api_key: Optional[str] = None,
+    model: Optional[str] = None,
+    base_url: Optional[str] = None
+) -> Optional[BaseAIClient]:
+    """
+    Get singleton AI client instance.
+    
+    This function provides a convenient way to get an AI client
+    without creating duplicate instances across different modules.
+    
+    Args:
+        provider: AI provider name
+        api_key: API key
+        model: Model name
+        base_url: Custom base URL
+        
+    Returns:
+        AI client instance
+    """
+    return AIClientSingleton.get_client(provider, api_key, model, base_url)

@@ -5,26 +5,18 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from typing import Dict, Optional
 from pathlib import Path
 from infra.neo4j_client import neo4j_client
-from infra.storage import Storage
 from services.parser import ParserFactory
-from services.extractor import TripletExtractor
-from services.linker import EntityLinker
-from services.graph_service import GraphService
-from services.ai_segmenter import AISegmenter
 from infra.queue import get_queue, update_job_progress
+from config import get_instance, InstanceNames
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
-storage = Storage()
-extractor = TripletExtractor()
-linker = EntityLinker()
-graph_service = GraphService()
-
-# Initialize AI segmenter (optional)
-try:
-    ai_segmenter = AISegmenter()
-except ValueError:
-    ai_segmenter = None
+# 获取全局实例
+storage = get_instance(InstanceNames.STORAGE)
+extractor = get_instance(InstanceNames.TRIPLET_EXTRACTOR)
+linker = get_instance(InstanceNames.ENTITY_LINKER)
+graph_service = get_instance(InstanceNames.GRAPH_SERVICE)
+ai_segmenter = get_instance(InstanceNames.AI_SEGMENTER)
 
 # Initialize Redis queue
 queue = get_queue()

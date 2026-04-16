@@ -86,11 +86,11 @@ class TestStorageModule:
 class TestAIProvidersModule:
     """AI提供商模块测试"""
     
-    def test_get_ai_client(self):
-        """测试获取AI客户端"""
+    def test_create_ai_client(self):
+        """测试创建AI客户端"""
         try:
-            from infra.ai_providers import get_ai_client
-            client = get_ai_client()
+            from infra.ai_providers import AIProviderFactory
+            client = AIProviderFactory.create_client("mock")
             assert client is not None
         except Exception as e:
             pytest.skip(f"AI客户端不可用: {e}")
