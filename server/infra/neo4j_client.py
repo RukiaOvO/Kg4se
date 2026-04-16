@@ -415,8 +415,8 @@ class Neo4jClient:
         
         query = f"""
         MATCH (a), (b)
-        WHERE (a:Document AND a.id = $source_id) OR (a:Concept AND a.name = $source_id)
-        AND (b:Document AND b.id = $target_id) OR (b:Concept AND b.name = $target_id)
+        WHERE ((a:Document AND a.id = $source_id) OR (a:Concept AND a.name = $source_id))
+          AND ((b:Document AND b.id = $target_id) OR (b:Concept AND b.name = $target_id))
         MERGE (a)-[r:{rel_type}]->(b)
         SET r += $properties,
             r.created_at = coalesce(r.created_at, datetime()),

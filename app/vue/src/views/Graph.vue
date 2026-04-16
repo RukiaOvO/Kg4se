@@ -37,7 +37,7 @@
             <n-input-number
               v-model:value="nodeLimit"
               :min="10"
-              :max="1000"
+              :max="10000"
               :step="10"
               style="width: 200px"
               size="small"
@@ -413,7 +413,7 @@ const message = useMessage()
 const dialog = useDialog()
 const route = useRoute()
 const router = useRouter()
-const nodeLimit = ref(100)
+const nodeLimit = ref(500)
 const documentDepth = ref(2)
 const currentDocumentId = ref<string | null>(null)
 const documentOptions = ref<Array<{ label: string; value: string; meta?: any }>>([])
@@ -662,12 +662,69 @@ const renderGraph = () => {
     cy.destroy()
   }
 
+  const nodeCount = graphData.value.nodes.length
+  const edgeCount = graphData.value.edges.length
+  
+  // Performance optimizations based on node count
+  const shouldAnimate = nodeCount < 200
+  const shouldShowLabels = nodeCount < 500
+  const shouldSimplify = nodeCount >= 1000
+  
+  if (nodeCount >= 500) {
+    message.warning(`图谱包含 ${nodeCount} 个节点和 ${edgeCount} 条边，可能会影响渲染性能。建议使用文档过滤功能或减小节点数量限制。`)
+  }
+
   const layoutOptions: any = {
     name: layoutType.value,
     rankDir: 'TB',
-    spacingFactor: 1.5,
-    animate: true,
-    animationDuration: 500
+    spacingFactor: shouldSimplify ? 1.2 : 1.5,
+    animate: shouldAnimate,
+    animationDuration: 300,
+    randomize: false
+  }
+
+  // Build dynamic styles based on node count
+  const nodeWidth = shouldSimplify ? 20 : 40
+  const nodeHeight = shouldSimplify ? 20 : 40
+  const fontSize = shouldSimplify ? 8 : 12
+  
+  const nodeStyle: any = {
+    'background-color': '#18a058',
+    'width': nodeWidth,
+    'height': nodeHeight,
+    'border-width': shouldSimplify ? 1 : 3,
+    'border-color': '#fff',
+    'box-shadow': shouldSimplify ? 'none' : '0 4px 8px rgba(0,0,0,0.15)'
+  }
+  
+  if (shouldShowLabels) {
+    nodeStyle['label'] = 'data(label)'
+    nodeStyle['text-valign'] = 'bottom'
+    nodeStyle['text-halign'] = 'center'
+    nodeStyle['text-margin-y'] = '8px'
+    nodeStyle['font-size'] = `${fontSize}px`
+    nodeStyle['font-weight'] = 500
+    nodeStyle['font-family'] = 'Noto Serif SC, sans-serif'
+    nodeStyle['color'] = '#333'
+    nodeStyle['text-background-color'] = '#fff'
+    nodeStyle['text-background-opacity'] = 0.8
+    nodeStyle['text-background-padding'] = '4px'
+  }
+  
+  const edgeStyle: any = {
+    'width': shouldSimplify ? 1 : 2,
+    'line-color': '#cbd5e1',
+    'target-arrow-color': '#cbd5e1',
+    'target-arrow-shape': 'triangle',
+    'curve-style': shouldSimplify ? 'straight' : 'bezier'
+  }
+  
+  if (shouldShowLabels && !shouldSimplify) {
+    edgeStyle['label'] = 'data(label)'
+    edgeStyle['font-size'] = '10px'
+    edgeStyle['text-background-color'] = '#fff'
+    edgeStyle['text-background-opacity'] = 0.8
+    edgeStyle['text-background-padding'] = '2px'
   }
 
   cy = cytoscape({
@@ -676,25 +733,7 @@ const renderGraph = () => {
     style: ([
       {
         selector: 'node',
-        style: {
-          'background-color': '#18a058',
-          'label': 'data(label)',
-          'width': 40,
-          'height': 40,
-          'text-valign': 'bottom',
-          'text-halign': 'center',
-          'text-margin-y': '8px',
-          'font-size': '12px',
-          'font-weight': 500,
-          'font-family': 'Noto Serif SC, sans-serif',
-          'color': '#333',
-          'text-background-color': '#fff',
-          'text-background-opacity': 0.8,
-          'text-background-padding': '4px',
-          'border-width': 3,
-          'border-color': '#fff',
-          'box-shadow': '0 4px 8px rgba(0,0,0,0.15)'
-        }
+        style: nodeStyle
       },
       {
         selector: 'node.Concept',
@@ -719,24 +758,13 @@ const renderGraph = () => {
         style: {
           'border-width': 4,
           'border-color': '#6366f1',
-          'width': 50,
-          'height': 50
+          'width': shouldSimplify ? 26 : 50,
+          'height': shouldSimplify ? 26 : 50
         }
       },
       {
         selector: 'edge',
-        style: {
-          'width': 2,
-          'line-color': '#cbd5e1',
-          'target-arrow-color': '#cbd5e1',
-          'target-arrow-shape': 'triangle',
-          'curve-style': 'bezier',
-          'label': 'data(label)',
-          'font-size': '10px',
-          'text-background-color': '#fff',
-          'text-background-opacity': 0.8,
-          'text-background-padding': '2px'
-        }
+        style: edgeStyle
       },
       {
         selector: 'edge:selected',

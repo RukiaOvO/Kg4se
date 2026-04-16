@@ -270,7 +270,7 @@ export const deleteDocument = (documentId: string): Promise<void> =>
 export const getGraphData = (limit: number = 500): Promise<any> =>
   api.get('/graph/visualize', {
     params: {
-      limit: Math.min(limit, 5000)
+      limit: Math.min(limit, 10000)
     }
   })
 

@@ -28,7 +28,7 @@ def _clean_properties(props: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/visualize")
 async def visualize_graph(
-    limit: int = Query(500, ge=10, le=5000, description="Maximum nodes to return"),
+    limit: int = Query(500, ge=10, le=10000, description="Maximum nodes to return"),
     node_type: Optional[str] = Query(None, description="Filter by node type (Concept, Document, etc)"),
 ):
     """
@@ -45,15 +45,18 @@ async def visualize_graph(
             OPTIONAL MATCH (n)-[r]->(m)
             WITH n, r, m
             RETURN n, r, m
-            LIMIT {limit}
+            LIMIT {limit * 3}
             """
         else:
+            # Use a higher limit since records can contain duplicate nodes due to relationships
+            # First get documents to ensure they are included
             query = f"""
             MATCH (n)
             OPTIONAL MATCH (n)-[r]->(m)
             WITH n, r, m
+            ORDER BY CASE WHEN 'Document' IN labels(n) THEN 0 ELSE 1 END
             RETURN n, r, m
-            LIMIT {limit}
+            LIMIT {limit * 3}
             """
         
         results = neo4j_client.execute_query(query)
