@@ -3,7 +3,7 @@
     <!-- Header Section -->
     <div class="page-header">
       <div class="header-content">
-        <h1 class="page-title">POW_SE</h1>
+        <h1 class="page-title">Kg4se</h1>
         <p class="page-subtitle">仪表盘 · Dashboard</p>
       </div>
       <div class="header-actions">
@@ -352,18 +352,23 @@ const pieChartOption = computed(() => {
       formatter: '{b}: {c} ({d}%)'
     },
     legend: {
-      orient: 'vertical',
-      right: 10,
-      top: 'center',
+      orient: 'horizontal',
+      bottom: 10,
+      left: 'center',
       textStyle: {
-        color: '#666'
-      }
+        color: '#666',
+        fontSize: 12
+      },
+      itemWidth: 12,
+      itemHeight: 12,
+      itemGap: 16
     },
     series: [
       {
         name: '关系类型',
         type: 'pie',
-        radius: ['40%', '70%'],
+        radius: ['35%', '65%'],
+        center: ['50%', '45%'],
         avoidLabelOverlap: false,
         itemStyle: {
           borderRadius: 10,

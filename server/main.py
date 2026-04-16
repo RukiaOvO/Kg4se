@@ -33,7 +33,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="POW_SE API",
+    title="Kg4se API",
     description="Personal Knowledge Graph System",
     version="0.1.0",
     lifespan=lifespan

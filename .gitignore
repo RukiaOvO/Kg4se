@@ -42,6 +42,8 @@ wheels/
 # Data and uploads
 data/
 uploads/
+llamaindex/
+pdf/
 *.db
 *.sqlite
 scripts/

@@ -284,7 +284,7 @@ neighbors = neo4j_client.get_concept_neighbors(
 ```python
 class Settings(BaseSettings):
     # 应用配置
-    app_name: str = "POW"
+    app_name: str = "Kg4se"
     debug: bool = False
     
     # Neo4j配置

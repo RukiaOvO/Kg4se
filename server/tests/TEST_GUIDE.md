@@ -1,6 +1,6 @@
 # 测试脚本使用指南
 
-本目录包含 POW_SE 项目的所有测试代码。
+本目录包含 Kg4se 项目的所有测试代码。
 
 ## 📁 测试结构
 
@@ -348,6 +348,6 @@ def my_test_data(neo4j_test_client):
 
 **编写测试,保证质量! 🧪✨**
 
-Made with ❤️ by POW_SE Team
+Made with ❤️ by Kg4se Team
 
 </div>

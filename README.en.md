@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎓 POW_SE
+# 🎓 Kg4se
 
 ### Software Engineering Knowledge Graph Platform
 
@@ -38,7 +38,7 @@ Multi-modal Knowledge Graph incremental construction platform for the Software E
 ## Project Structure
 
 ```text
-POW/
+Kg4se/
 ├── DOCUMENTATION_INDEX.md      # Documentation index
 ├── app/vue/                    # Frontend app
 │   ├── src/                    # Views, components, stores, api

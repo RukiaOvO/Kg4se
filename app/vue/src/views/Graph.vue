@@ -14,36 +14,33 @@
 
     <n-card class="graph-card" :bordered="false">
       <!-- Control Panel -->
-      <div class="control-item">
-        <n-icon size="20" :component="SearchOutline" class="control-icon" />
-        <n-input
-          v-model:value="searchKeyword"
-          placeholder="搜索节点..."
-          clearable
-          style="width: 200px"
-          @keyup.enter="searchNode"
-          @clear="clearSearch"
-        >
-          <template #suffix>
-            <n-button quaternary @click="searchNode" :disabled="!searchKeyword">
-              <template #icon>
-                <n-icon><search-outline /></n-icon>
-              </template>
-            </n-button>
-          </template>
-        </n-input>
-      </div>
       <div class="control-panel">
         <n-space :size="16" align="center">
+          <!-- Search -->
+          <div class="control-item">
+            <n-input
+              v-model:value="searchKeyword"
+              placeholder="搜索节点..."
+              clearable
+              style="width: 180px"
+              @keyup.enter="searchNode"
+              @clear="clearSearch"
+            >
+              <template #prefix>
+                <n-icon size="16" :component="SearchOutline" />
+              </template>
+            </n-input>
+          </div>
+
           <!-- Node Limit -->
           <div class="control-item">
-            <n-icon size="20" :component="LayersOutline" class="control-icon" />
             <n-input-number
               v-model:value="nodeLimit"
               :min="10"
               :max="1000"
               :step="10"
-              style="width: 160px"
+              style="width: 200px"
+              size="small"
             >
               <template #prefix>
                 {{ t('graph.node_limit') }}
@@ -53,17 +50,17 @@
 
           <!-- Layout Type -->
           <div class="control-item">
-            <n-icon size="20" :component="GridOutline" class="control-icon" />
             <n-select
               v-model:value="layoutType"
               :options="layoutOptions"
-              style="width: 140px"
+              style="width: 120px"
+              size="small"
               @update:value="handleLayoutChange"
             />
           </div>
 
           <!-- Load Button -->
-          <n-button type="primary" :loading="loading" @click="loadGraph" size="large">
+          <n-button type="primary" :loading="loading" @click="loadGraph" size="small">
             <template #icon>
               <n-icon><refresh-outline /></n-icon>
             </template>
@@ -71,69 +68,52 @@
           </n-button>
 
           <!-- Document Scope -->
-          <div class="control-item" style="min-width: 320px">
+          <div class="control-item" style="min-width: 240px">
             <n-select
               v-model:value="currentDocumentId"
               :options="documentOptions"
-              placeholder="选择文档（默认全部）"
+              placeholder="选择文档"
               clearable
               filterable
-              style="width: 260px"
+              style="width: 200px"
+              size="small"
               @update:value="handleDocumentChange"
             />
-            <n-input-number
-              v-if="currentDocumentId"
-              v-model:value="documentDepth"
-              :min="1"
-              :max="5"
-              :step="1"
-              size="small"
-              style="width: 120px"
-            >
-              <template #prefix>深度</template>
-            </n-input-number>
-            <n-button v-if="currentDocumentId" size="small" tertiary @click="resetDocumentFilter">
-              查看全部
-            </n-button>
           </div>
 
-          <n-divider vertical />
-
           <!-- Quick Actions -->
-          <n-button type="success" @click="handleCreateNode" :disabled="!cy">
+          <n-button type="success" @click="handleCreateNode" :disabled="!cy" size="small">
             <template #icon>
               <n-icon><add-outline /></n-icon>
             </template>
             创建节点
           </n-button>
 
-          <n-button @click="handleCreateEdge" :disabled="!cy">
+          <n-button @click="handleCreateEdge" :disabled="!cy" size="small">
             <template #icon>
               <n-icon><link-outline /></n-icon>
             </template>
             创建关系
           </n-button>
 
-          <n-divider vertical />
-
           <!-- Graph Controls -->
-          <n-button-group>
-            <n-button @click="zoomIn" :disabled="!cy">
+          <n-button-group size="small">
+            <n-button @click="zoomIn" :disabled="!cy" tooltip="放大">
               <template #icon>
                 <n-icon><add-outline /></n-icon>
               </template>
             </n-button>
-            <n-button @click="zoomOut" :disabled="!cy">
+            <n-button @click="zoomOut" :disabled="!cy" tooltip="缩小">
               <template #icon>
                 <n-icon><remove-outline /></n-icon>
               </template>
             </n-button>
-            <n-button @click="fitView" :disabled="!cy">
+            <n-button @click="fitView" :disabled="!cy" tooltip="适应视图">
               <template #icon>
                 <n-icon><expand-outline /></n-icon>
               </template>
             </n-button>
-            <n-button @click="resetView" :disabled="!cy">
+            <n-button @click="resetView" :disabled="!cy" tooltip="重置视图">
               <template #icon>
                 <n-icon><contract-outline /></n-icon>
               </template>
@@ -141,10 +121,10 @@
           </n-button-group>
 
           <!-- Export -->
-          <n-button @click="exportGraph" :disabled="!cy">
+          <n-button @click="exportGraph" :disabled="!cy" size="small">
             <template #icon>
               <n-icon><download-outline /></n-icon>
-</template>
+            </template>
             导出
           </n-button>
         </n-space>
@@ -539,28 +519,82 @@ const loadGraph = async () => {
     if (result.nodes && result.edges) {
       // Transform backend Node format to Cytoscape format
       // New format includes: id, labels, type, label, properties, degree
-      nodes = result.nodes.map((node: any) => ({
-        data: {
-          id: node.id,
-          label: node.label || node.properties?.name || node.properties?.filename || node.id,
-          type: node.type || (node.labels && node.labels[0]) || 'Unknown',
-          degree: node.degree || 0,
-          ...node.properties
-        },
-        classes: node.labels ? node.labels.join(' ') : node.type || 'Unknown'
-      }))
+      nodes = result.nodes
+        .filter((node: any) => {
+          // Filter out system nodes like system_config
+          const nodeId = node.id || ''
+          const nodeLabel = node.label || node.properties?.name || ''
+          const isSystemNode = 
+            nodeId.toLowerCase().includes('system') || 
+            nodeId.toLowerCase().includes('config') ||
+            nodeLabel.toLowerCase().includes('system') ||
+            nodeLabel.toLowerCase().includes('config')
+          return !isSystemNode
+        })
+        .map((node: any) => {
+          // Extract labels and determine primary type
+          // Handle different label formats: array, string, or undefined
+          let nodeLabels = node.labels || []
+          if (typeof nodeLabels === 'string') {
+            nodeLabels = [nodeLabels]
+          }
+          const nodeType = node.type || (nodeLabels.length > 0 ? nodeLabels[0] : 'Unknown')
+          
+          // Also check properties for document type hints
+          const hasFilename = !!node.properties?.filename
+          const hasDocType = node.properties?.kind === 'pdf' || 
+                           node.properties?.kind === 'docx' ||
+                           node.properties?.kind === 'md'
+          
+          // Determine node class for styling
+          // Prioritize known types: Concept, Document, Entity
+          let nodeClass = 'Unknown'
+          if (nodeLabels.includes('Concept') || nodeType === 'Concept') {
+            nodeClass = 'Concept'
+          } else if (
+            nodeLabels.includes('Document') || 
+            nodeType === 'Document' ||
+            hasFilename ||
+            hasDocType
+          ) {
+            nodeClass = 'Document'
+          } else if (nodeLabels.includes('Entity') || nodeType === 'Entity') {
+            nodeClass = 'Entity'
+          }
+          
+          return {
+            data: {
+              id: node.id,
+              label: node.label || node.properties?.name || node.properties?.filename || node.id,
+              type: nodeClass,
+              degree: node.degree || 0,
+              ...node.properties
+            },
+            classes: nodeClass
+          }
+        })
       
       // Transform backend Edge format to Cytoscape format
-      edges = result.edges.map((edge: any) => ({
-        data: {
-          id: edge.id || `${edge.source}-${edge.target}-${edge.type}`,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label || edge.type,
-          type: edge.type,
-          ...edge.properties
-        }
-      }))
+      // First get valid node IDs after filtering
+      const validNodeIds = new Set(nodes.map((n: any) => n.data.id))
+      
+      edges = result.edges
+        .filter((edge: any) => {
+          // Filter out edges connected to filtered nodes
+          const sourceValid = validNodeIds.has(edge.source)
+          const targetValid = validNodeIds.has(edge.target)
+          return sourceValid && targetValid
+        })
+        .map((edge: any) => ({
+          data: {
+            id: edge.id || `${edge.source}-${edge.target}-${edge.type}`,
+            source: edge.source,
+            target: edge.target,
+            label: edge.label || edge.type,
+            type: edge.type,
+            ...edge.properties
+          }
+        }))
     }
 
     graphData.value = { nodes, edges }

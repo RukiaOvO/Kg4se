@@ -1,6 +1,6 @@
 # 前端架构文档
 
-POW_SE 前端基于 Vue 3 + TypeScript + Vite 构建,采用组合式 API 和模块化设计。
+Kg4se 前端基于 Vue 3 + TypeScript + Vite 构建,采用组合式 API 和模块化设计。
 
 ## 📁 目录结构
 
@@ -495,7 +495,7 @@ npm run preview
 **环境变量** (`.env`):
 ```env
 VITE_API_URL=http://localhost:8000
-VITE_APP_TITLE=POW_SE
+VITE_APP_TITLE=Kg4se
 VITE_ENABLE_MOCK=false
 ```
 

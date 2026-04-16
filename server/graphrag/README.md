@@ -1,6 +1,6 @@
 # GraphRAG - 图增强检索生成系统
 
-GraphRAG (Graph Retrieval-Augmented Generation) 是 POW_SE 项目的核心知识图谱构建模块,实现了从原始文档到结构化知识图谱的完整流程。
+GraphRAG (Graph Retrieval-Augmented Generation) 是 Kg4se 项目的核心知识图谱构建模块,实现了从原始文档到结构化知识图谱的完整流程。
 
 ## 📋 目录
 

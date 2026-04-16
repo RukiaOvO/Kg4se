@@ -227,6 +227,6 @@ pytest -n auto  # 自动检测 CPU 核心数
 
 **保持测试绿色! 🧪✅**
 
-Made with ❤️ by POW_SE Team
+Made with ❤️ by Kg4se Team
 
 </div>

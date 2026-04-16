@@ -1,8 +1,8 @@
 {
   "app": {
-    "title": "POW_SE",
+    "title": "Kg4se",
     "subtitle": "Intelligent Knowledge Graph Analysis Platform",
-    "page_title": "POW_SE"
+    "page_title": "Kg4se"
   },
   "navigation": {
     "title": "Navigation",
@@ -16,7 +16,7 @@
     "evaluation": "Quality Analysis"
   },
   "dashboard": {
-    "title": "POW_SE",
+    "title": "Kg4se",
     "subtitle": "Dashboard",
     "key_metrics": "Key Metrics",
     "refresh_data": "Refresh Data",

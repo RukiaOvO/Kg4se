@@ -1,8 +1,8 @@
 {
   "app": {
-    "title": "POW_SE",
+    "title": "Kg4se",
     "subtitle": "知识图谱构建与管理平台",
-    "page_title": "POW_SE"
+    "page_title": "Kg4se"
   },
   "navigation": {
     "title": "导航",
@@ -16,7 +16,7 @@
     "evaluation": "质量分析"
   },
   "dashboard": {
-    "title": "POW_SE",
+    "title": "Kg4se",
     "subtitle": "仪表盘",
     "key_metrics": "核心指标",
     "refresh_data": "刷新数据",

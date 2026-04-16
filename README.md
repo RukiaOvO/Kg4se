@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🎓 POW_SE
+# 🎓 Kg4se
 
 ### 软件工程知识图谱平台
 
@@ -38,7 +38,7 @@
 ## 项目结构
 
 ```text
-POW/
+Kg4se/
 ├── DOCUMENTATION_INDEX.md      # 文档总览/导航
 ├── app/vue/                    # 前端应用
 │   ├── src/                    # 业务页面、组件、stores、api

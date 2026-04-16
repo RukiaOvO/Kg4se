@@ -2,7 +2,7 @@
 services:
   newneo4j:
     image: neo4j:5.26-community
-    container_name: pow-neo4j
+    container_name: kg4se-neo4j
     environment:
       - NEO4J_AUTH=neo4j/neo4j1234
       - NEO4J_PLUGINS=["apoc", "graph-data-science"]
@@ -27,7 +27,7 @@ services:
 
   newredis:
     image: redis:7.4.7-alpine
-    container_name: pow-redis
+    container_name: kg4se-redis
     ports:
       - "16379:6379"
     volumes:

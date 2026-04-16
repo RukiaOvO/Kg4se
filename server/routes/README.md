@@ -1,6 +1,6 @@
 # API Routes 文档
 
-POW_SE 后端 API 路由模块,提供 RESTful API 接口。
+Kg4se 后端 API 路由模块,提供 RESTful API 接口。
 
 ## 📋 目录
 
