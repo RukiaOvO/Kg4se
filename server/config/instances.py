@@ -424,9 +424,5 @@ def _create_entity_linker():
 
 def _create_ai_segmenter():
     """创建 AI 分词器实例"""
-    try:
-        from services.ai_segmenter import AISegmenter
-        return AISegmenter()
-    except ValueError as e:
-        logger.warning(f"AI segmenter not available: {e}")
-        return None
+    from services.ai_segmenter import AISegmenter
+    return AISegmenter()

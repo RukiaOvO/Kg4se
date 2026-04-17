@@ -16,10 +16,10 @@ from services.parser import ParserFactory
 from services.extractor import TripletExtractor
 from services.linker import EntityLinker
 from services.graph_service import GraphService
-from services.ai_segmenter import AISegmenter
 from models.document import AIExtractionRequest
 from infra.queue import get_queue
 from infra.config import settings
+from config import get_instance, InstanceNames
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
@@ -28,15 +28,12 @@ extractor = TripletExtractor()
 linker = EntityLinker()
 graph_service = GraphService()
 
-# Initialize AI segmenter (optional, based on configured AI provider)
-try:
-    ai_segmenter = AISegmenter()
-except ValueError as e:
-    ai_segmenter = None
-    print(f"AI segmentation disabled: {str(e)}")
-
 # Initialize Redis queue
 queue = get_queue()
+
+def get_ai_segmenter():
+    """Get AI segmenter instance with lazy initialization."""
+    return get_instance(InstanceNames.AI_SEGMENTER)
 
 # Fallback job storage (used when Redis is not available)
 processing_jobs = {}
@@ -630,6 +627,8 @@ def process_document_background(
             print(f"   - 平均每个文本块: {avg_chunk_size:.0f} 字符")
         
         # AI智能分词模式
+        ai_segmenter = get_ai_segmenter() if enable_ai_segmentation else None
+        
         if enable_ai_segmentation and ai_segmenter:
             print(f"\n🧠 [AI模式] 启用智能知识抽取")
             
@@ -896,7 +895,7 @@ async def upload_and_process(
         raise HTTPException(status_code=400, detail="chunk_size 不能大于 20000 字符（建议不超过 8000）")
     
     # Validate AI segmentation
-    if enable_ai_segmentation and not ai_segmenter:
+    if enable_ai_segmentation and not get_ai_segmenter():
         raise HTTPException(
             status_code=400, 
             detail="AI智能分词需要配置 OPENAI_API_KEY 环境变量"
@@ -1102,7 +1101,7 @@ async def upload_text(
         raise HTTPException(status_code=400, detail="chunk_size 不能大于 20000 字符（建议不超过 8000）")
     
     # Validate AI segmentation
-    if request.enable_ai_segmentation and not ai_segmenter:
+    if request.enable_ai_segmentation and not get_ai_segmenter():
         raise HTTPException(
             status_code=400, 
             detail="AI智能分词需要配置 OPENAI_API_KEY 环境变量"
@@ -1251,7 +1250,7 @@ async def upload_url(
         raise HTTPException(status_code=400, detail="chunk_size 不能大于 20000 字符（建议不超过 8000）")
     
     # Validate AI segmentation
-    if request.enable_ai_segmentation and not ai_segmenter:
+    if request.enable_ai_segmentation and not get_ai_segmenter():
         raise HTTPException(
             status_code=400, 
             detail="AI智能分词需要配置 OPENAI_API_KEY 环境变量"
