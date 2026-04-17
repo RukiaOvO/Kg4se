@@ -4,10 +4,7 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE,
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
+  timeout: 30000
 })
 
 // Request interceptor

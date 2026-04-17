@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, BackgroundTasks
+from fastapi import APIRouter, File, HTTPException, UploadFile, BackgroundTasks, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -52,17 +52,33 @@ ALLOWED_EXTENSIONS = {
 }
 
 ALLOWED_MIME_TYPES = {
+    # PDF
     "application/pdf",
+    "application/x-pdf",
+    # Markdown
     "text/markdown",
     "text/x-markdown",
+    "text/x-markdown-markdown",
+    # Plain text
     "text/plain",
+    "text/plain; charset=utf-8",
+    # Word
     "application/msword",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     "application/octet-stream",  # fallback used by some browsers
-    "application/json",  # JSON
-    "text/csv", "application/csv",  # CSV
+    # JSON
+    "application/json",
+    "application/x-json",
+    "text/json",
+    # CSV
+    "text/csv",
+    "application/csv",
+    "text/plain; charset=utf-8",
+    # Excel
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",  # XLSX
     "application/vnd.ms-excel",  # XLS
+    "application/x-excel",
+    "application/x-msexcel",
 }
 
 SUPPORTED_TYPES_LABEL = "PDF, Markdown, TXT, Word (DOC/DOCX), JSON, CSV, Excel (XLS/XLSX)"
@@ -70,6 +86,8 @@ SUPPORTED_TYPES_LABEL = "PDF, Markdown, TXT, Word (DOC/DOCX), JSON, CSV, Excel (
 
 def get_document_kind(filename: str) -> str:
     """Determine document kind from filename."""
+    if not filename:
+        return "unknown"
     ext = Path(filename).suffix.lower()
     return ALLOWED_EXTENSIONS.get(ext, "unknown")
 
@@ -78,14 +96,10 @@ def validate_content_type(content_type: Optional[str]) -> None:
     """Validate uploaded file MIME type."""
     if not content_type:
         return
+    # 放宽 MIME 类型验证，只做警告而不阻止上传
+    # 因为不同浏览器可能发送不同的 MIME 类型
     if content_type not in ALLOWED_MIME_TYPES:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                f"Unsupported MIME type: {content_type}. "
-                f"Allowed types: {SUPPORTED_TYPES_LABEL}"
-            ),
-        )
+        print(f"⚠️ [上传] 非标准 MIME 类型: {content_type}，但文件扩展名已验证通过，继续处理")
 
 
 @router.post("", response_model=dict)
@@ -327,33 +341,12 @@ async def get_document(document_id: str):
     
     doc_data = doc_result[0]["d"]
     
-    # 获取统计信息
-    stats_query = """
-    MATCH (d:Document {id: $doc_id})
-    OPTIONAL MATCH (d)-[rel]-(related)
-    WITH d, 
-         count(DISTINCT CASE WHEN 'Chunk' IN labels(related) THEN related END) as chunk_count,
-         count(DISTINCT CASE WHEN 'Concept' IN labels(related) THEN related END) as concept_count,
-         count(DISTINCT CASE WHEN 'Claim' IN labels(related) THEN related END) as claim_count,
-         count(DISTINCT rel) as relation_count
-    RETURN
-        chunk_count,
-        concept_count,
-        claim_count,
-        relation_count
-    """
-    
-    stats_result = neo4j_client.execute_query(stats_query, {"doc_id": document_id})
+    # 获取统计信息（优先使用文档节点属性，与列表页保持一致）
     statistics = {
-        "chunk_count": stats_result[0].get("chunk_count", 0) or 0,
-        "concept_count": stats_result[0].get("concept_count", 0) or 0,
-        "claim_count": stats_result[0].get("claim_count", 0) or 0,
-        "relation_count": stats_result[0].get("relation_count", 0) or 0
-    } if stats_result else {
-        "chunk_count": 0,
-        "concept_count": 0,
-        "claim_count": 0,
-        "relation_count": 0
+        "chunk_count": doc_data.get("chunk_count", 0) or 0,
+        "concept_count": doc_data.get("concept_count", 0) or 0,
+        "claim_count": doc_data.get("claim_count", 0) or 0,
+        "relation_count": doc_data.get("relation_count", 0) or 0
     }
     
     # 获取关联的主题
@@ -610,7 +603,7 @@ def process_document_background(
         print(f"   - 文件类型: {kind}")
         print(f"   - 任务ID: {job_id}")
         print(f"   - Chunk大小: {chunk_size} 字符")
-        print(f"   - AI智能分词: {'启用' if enable_ai_segmentation else '禁用'}")
+        print(f"   - AI智能分词: 启用")
         if user_prompt:
             print(f"   - 用户Prompt: {user_prompt[:100]}...")
         print(f"{'#'*80}\n")
@@ -626,10 +619,11 @@ def process_document_background(
             avg_chunk_size = sum(len(c.text) for c in chunks) / len(chunks)
             print(f"   - 平均每个文本块: {avg_chunk_size:.0f} 字符")
         
-        # AI智能分词模式
-        ai_segmenter = get_ai_segmenter() if enable_ai_segmentation else None
+        # AI智能分词模式 - 硬编码始终启用
+        ai_segmenter = get_ai_segmenter()
+        enable_ai_segmentation = True
         
-        if enable_ai_segmentation and ai_segmenter:
+        if ai_segmenter:
             print(f"\n🧠 [AI模式] 启用智能知识抽取")
             
             # Step 1.5: Optimize user prompt if provided
@@ -744,6 +738,7 @@ def process_document_background(
                         d.chunk_count = $chunk_count,
                         d.claim_count = $claim_count,
                         d.concept_count = $concept_count,
+                        d.relation_count = $relation_count,
                         d.text_length = $text_length,
                         d.processing_status = "completed",
                         d.processed_at = datetime(),
@@ -755,6 +750,7 @@ def process_document_background(
                     "chunk_count": len(chunks),
                     "claim_count": len(linked_triplets),
                     "concept_count": len(concept_names),
+                    "relation_count": len(linked_triplets),
                     "text_length": len(full_text)
                 })
                 print(f"✅ [Neo4j统计更新] 文档统计信息已保存到数据库")
@@ -826,6 +822,7 @@ def process_document_background(
                         d.chunk_count = $chunk_count,
                         d.claim_count = $claim_count,
                         d.concept_count = $concept_count,
+                        d.relation_count = $relation_count,
                         d.text_length = $text_length,
                         d.processing_status = "completed",
                         d.processed_at = datetime(),
@@ -837,6 +834,7 @@ def process_document_background(
                     "chunk_count": len(chunks),
                     "claim_count": len(linked_triplets),
                     "concept_count": len(concept_names),
+                    "relation_count": len(linked_triplets),
                     "text_length": len(full_text)
                 })
                 print(f"✅ [Neo4j统计更新] 文档统计信息已保存到数据库")
@@ -859,13 +857,14 @@ def process_document_background(
 
 @router.post("/process", response_model=dict)
 async def upload_and_process(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     auto_process: bool = True,
     chunk_size: int = 2000,
-    enable_ai_segmentation: bool = False,
+    enable_ai_segmentation: str = "false",
     user_prompt: Optional[str] = None,
-    optimize_prompt: bool = True,
+    optimize_prompt: str = "true",
     root_topic: Optional[str] = None
 ):
     """
@@ -888,6 +887,30 @@ async def upload_and_process(
             "jobId": "..." (if auto_process=True)
         }
     """
+    # 直接从请求体获取原始表单数据（绕过 FastAPI 的自动类型转换）
+    form_data = await request.form()
+    enable_ai_segmentation_raw = form_data.get("enable_ai_segmentation", "false")
+    optimize_prompt_raw = form_data.get("optimize_prompt", "true")
+    
+    # Debug: Print raw values before conversion
+    print(f"\n[DEBUG upload_and_process] 原始表单值:")
+    print(f"  - enable_ai_segmentation_raw: '{enable_ai_segmentation_raw}' (类型: {type(enable_ai_segmentation_raw)})")
+    print(f"  - optimize_prompt_raw: '{optimize_prompt_raw}' (类型: {type(optimize_prompt_raw)})")
+    
+    # 转换为布尔值
+    enable_ai_segmentation = enable_ai_segmentation_raw.lower() == "true"
+    optimize_prompt = optimize_prompt_raw.lower() == "true"
+    
+    # Debug: Print received parameters (after conversion)
+    print(f"\n[DEBUG upload_and_process] 接收到参数:")
+    print(f"  - auto_process: {auto_process} (类型: {type(auto_process)})")
+    print(f"  - chunk_size: {chunk_size} (类型: {type(chunk_size)})")
+    print(f"  - enable_ai_segmentation: {enable_ai_segmentation} (类型: {type(enable_ai_segmentation)})")
+    print(f"  - user_prompt: {user_prompt}")
+    print(f"  - optimize_prompt: {optimize_prompt}")
+    print(f"  - root_topic: {root_topic}")
+    print(f"  - 文件名: {file.filename}")
+    
     # Validate chunk_size
     if chunk_size < 100:
         raise HTTPException(status_code=400, detail="chunk_size 不能小于 100 字符")
@@ -964,36 +987,40 @@ async def upload_and_process(
         job_id = f"job_{uuid.uuid4().hex[:12]}"
         
         # Try to use RQ queue if available
-        if queue.is_connected():
-            job = queue.enqueue(
-                process_document_background,
-                doc_id,
-                file_path,
-                kind,
-                job_id,
-                chunk_size,
-                enable_ai_segmentation,
-                user_prompt,
-                optimize_prompt,
-                root_topic,
-                job_timeout='1h'
-            )
-            
-            if job:
-                # Initialize job metadata
-                job.meta = {
-                    "status": "queued",
-                    "documentId": doc_id,
-                    "progress": 0,
-                    "message": "等待处理..."
-                }
-                job.save()
-                response["status"] = "processing"
-                response["jobId"] = job.id
-                response["message"] = "文档已上传，正在后台处理..."
-                return response
+        import os
+        # Windows 系统不支持 os.fork()，RQ Worker 无法工作，直接使用 BackgroundTasks
+        if queue.is_connected() and os.name != 'nt':
+            try:
+                job = queue.enqueue(
+                    process_document_background,
+                    doc_id,
+                    file_path,
+                    kind,
+                    job_id,
+                    chunk_size,
+                    enable_ai_segmentation,
+                    user_prompt,
+                    optimize_prompt,
+                    root_topic,
+                    timeout='1h'
+                )
+                
+                if job:
+                    job.meta = {
+                        "status": "queued",
+                        "documentId": doc_id,
+                        "progress": 0,
+                        "message": "等待处理..."
+                    }
+                    job.save()
+                    response["status"] = "processing"
+                    response["jobId"] = job.id
+                    response["message"] = "文档已上传，正在后台处理..."
+                    return response
+            except Exception as e:
+                print(f"⚠️  RQ 队列失败，回退到 BackgroundTasks: {e}")
         
-        # Fallback to BackgroundTasks if Redis is not available
+        # Fallback to BackgroundTasks (Windows 系统或 Redis 不可用)
         _update_upload_status(job_id, "queued", 0, "等待处理...", documentId=doc_id)
         
         background_tasks.add_task(
@@ -1093,6 +1120,11 @@ async def upload_text(
             "jobId": "..." (if auto_process=True)
         }
     """
+    print(f"\n[DEBUG upload_text] 接收到参数:")
+    print(f"   - enable_ai_segmentation: {request.enable_ai_segmentation} (类型: {type(request.enable_ai_segmentation)})")
+    print(f"   - user_prompt: {request.user_prompt}")
+    print(f"   - optimize_prompt: {request.optimize_prompt}")
+    print(f"   - root_topic: {request.root_topic}")
     # Validate chunk_size
     chunk_size = request.chunk_size
     if chunk_size < 100:
@@ -1165,36 +1197,38 @@ async def upload_text(
         job_id = f"job_{uuid.uuid4().hex[:12]}"
         
         # Try to use RQ queue if available
-        if queue.is_connected():
-            job = queue.enqueue(
-                process_document_background,
-                doc_id,
-                file_path,
-                "txt",
-                job_id,
-                chunk_size,
-                request.enable_ai_segmentation,
-                request.user_prompt,
-                request.optimize_prompt,
-                request.root_topic,
-                job_timeout='1h'
-            )
-            
-            if job:
-                # Initialize job metadata
-                job.meta = {
-                    "status": "queued",
-                    "documentId": doc_id,
-                    "progress": 0,
-                    "message": "等待处理..."
-                }
-                job.save()
-                response["status"] = "processing"
-                response["jobId"] = job.id
-                response["message"] = "文本已保存，正在后台处理..."
-                return response
+        import os
+        if queue.is_connected() and os.name != 'nt':
+            try:
+                job = queue.enqueue(
+                    process_document_background,
+                    doc_id,
+                    file_path,
+                    "txt",
+                    job_id,
+                    chunk_size,
+                    request.enable_ai_segmentation,
+                    request.user_prompt,
+                    request.optimize_prompt,
+                    request.root_topic,
+                    timeout='1h'
+                )
+                
+                if job:
+                    job.meta = {
+                        "status": "queued",
+                        "documentId": doc_id,
+                        "progress": 0,
+                        "message": "等待处理..."
+                    }
+                    job.save()
+                    response["status"] = "processing"
+                    response["jobId"] = job.id
+                    response["message"] = "文本已保存，正在后台处理..."
+                    return response
+            except Exception as e:
+                print(f"⚠️  RQ 队列失败，回退到 BackgroundTasks: {e}")
         
-        # Fallback to BackgroundTasks if Redis is not available
         _update_upload_status(job_id, "queued", 0, "等待处理...", documentId=doc_id)
         
         background_tasks.add_task(
@@ -1363,37 +1397,38 @@ async def upload_url(
     if request.auto_process:
         job_id = f"job_{uuid.uuid4().hex[:12]}"
         
-        # Try to use RQ queue if available
-        if queue.is_connected():
-            job = queue.enqueue(
-                process_document_background,
-                doc_id,
-                file_path,
-                "txt",
-                job_id,
-                chunk_size,
-                request.enable_ai_segmentation,
-                request.user_prompt,
-                request.optimize_prompt,
-                request.root_topic,
-                job_timeout='1h'
-            )
-            
-            if job:
-                # Initialize job metadata
-                job.meta = {
-                    "status": "queued",
-                    "documentId": doc_id,
-                    "progress": 0,
-                    "message": "等待处理..."
-                }
-                job.save()
-                response["status"] = "processing"
-                response["jobId"] = job.id
-                response["message"] = "网页内容已抓取，正在后台处理..."
-                return response
+        import os
+        if queue.is_connected() and os.name != 'nt':
+            try:
+                job = queue.enqueue(
+                    process_document_background,
+                    doc_id,
+                    file_path,
+                    "txt",
+                    job_id,
+                    chunk_size,
+                    request.enable_ai_segmentation,
+                    request.user_prompt,
+                    request.optimize_prompt,
+                    request.root_topic,
+                    timeout='1h'
+                )
+                
+                if job:
+                    job.meta = {
+                        "status": "queued",
+                        "documentId": doc_id,
+                        "progress": 0,
+                        "message": "等待处理..."
+                    }
+                    job.save()
+                    response["status"] = "processing"
+                    response["jobId"] = job.id
+                    response["message"] = "网页内容已抓取，正在后台处理..."
+                    return response
+            except Exception as e:
+                print(f"⚠️  RQ 队列失败，回退到 BackgroundTasks: {e}")
         
-        # Fallback to BackgroundTasks if Redis is not available
         _update_upload_status(job_id, "queued", 0, "等待处理...", documentId=doc_id)
         
         background_tasks.add_task(

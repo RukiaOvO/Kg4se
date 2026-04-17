@@ -55,7 +55,9 @@ class RedisQueue:
             return None
         
         try:
-            job = self.queue.enqueue(func, *args, **kwargs, job_timeout='1h')
+            if 'timeout' not in kwargs:
+                kwargs['timeout'] = '1h'
+            job = self.queue.enqueue(func, *args, **kwargs)
             return job
         except Exception as e:
             print(f"⚠️  Failed to enqueue job: {e}")

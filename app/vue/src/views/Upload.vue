@@ -89,7 +89,7 @@
                   <n-collapse>
                     <n-collapse-item title="🤖 AI 智能分析（可选）" name="ai-config">
                       <n-space vertical :size="12">
-                        <n-switch v-model:value="enableAI">
+                        <n-switch v-model="enableAI">
                           <template #checked>启用 AI 深度分析</template>
                           <template #unchecked>使用传统模式</template>
                         </n-switch>
@@ -182,7 +182,7 @@
                   <n-collapse>
                     <n-collapse-item title="🤖 AI 智能分析（可选）" name="ai-config">
                       <n-space vertical :size="12">
-                        <n-switch v-model:value="enableAI">
+                        <n-switch v-model="enableAI">
                           <template #checked>启用 AI 深度分析</template>
                           <template #unchecked>使用传统模式</template>
                         </n-switch>
@@ -280,7 +280,7 @@
                   <n-collapse>
                     <n-collapse-item title="🤖 AI 智能分析（可选）" name="ai-config">
                       <n-space vertical :size="12">
-                        <n-switch v-model:value="enableAI">
+                        <n-switch v-model="enableAI">
                           <template #checked>启用 AI 深度分析</template>
                           <template #unchecked>使用传统模式</template>
                         </n-switch>
@@ -640,14 +640,12 @@ const handleUpload = async () => {
   resetState()
   
   try {
-    const aiOptions = enableAI.value ? {
-      enableAI: true,
-      userPrompt: userPrompt.value || undefined,
-      optimizePrompt: optimizePrompt.value
-    } : undefined
+    console.log('[DEBUG Upload.vue handleUpload] enableAI.value:', enableAI.value)
     
     const options = {
-      ...aiOptions,
+      enable_ai_segmentation: enableAI.value,
+      userPrompt: userPrompt.value || undefined,
+      optimizePrompt: optimizePrompt.value,
       rootTopic: rootTopic.value || undefined
     }
     
@@ -705,6 +703,8 @@ const handleTextUpload = async () => {
   resetState()
   
   try {
+    console.log('[DEBUG Upload.vue handleTextUpload] enableAI.value:', enableAI.value)
+    
     const aiOptions = enableAI.value ? {
       enableAI: true,
       userPrompt: userPrompt.value || undefined,
@@ -712,9 +712,13 @@ const handleTextUpload = async () => {
     } : undefined
     
     const options = {
-      ...aiOptions,
+      enable_ai_segmentation: enableAI.value,
+      userPrompt: userPrompt.value || undefined,
+      optimizePrompt: optimizePrompt.value,
       rootTopic: rootTopic.value || undefined
     }
+    
+    console.log('[DEBUG Upload.vue handleTextUpload] options:', options)
     
     const result = await uploadText(
       textContent.value,
@@ -772,14 +776,10 @@ const handleUrlUpload = async () => {
   resetState()
   
   try {
-    const aiOptions = enableAI.value ? {
-      enableAI: true,
-      userPrompt: userPrompt.value || undefined,
-      optimizePrompt: optimizePrompt.value
-    } : undefined
-    
     const options = {
-      ...aiOptions,
+      enable_ai_segmentation: enableAI.value,
+      userPrompt: userPrompt.value || undefined,
+      optimizePrompt: optimizePrompt.value,
       rootTopic: rootTopic.value || undefined
     }
     

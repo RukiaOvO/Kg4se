@@ -104,7 +104,7 @@ export const getDashboardStats = (): Promise<DashboardStats> =>
 export const uploadFile = (
   file: File, 
   options?: {
-    enableAI?: boolean
+    enable_ai_segmentation?: boolean
     userPrompt?: string
     optimizePrompt?: boolean
     rootTopic?: string
@@ -114,23 +114,26 @@ export const uploadFile = (
   formData.append('file', file)
   formData.append('auto_process', 'true')
   
-  if (options?.enableAI) {
-    formData.append('enable_ai_segmentation', 'true')
+  // 始终发送 enable_ai_segmentation 字段，避免后端使用默认值
+  formData.append('enable_ai_segmentation', String(options?.enable_ai_segmentation === true))
+  
+  if (options?.enable_ai_segmentation) {
     if (options.userPrompt) {
       formData.append('user_prompt', options.userPrompt)
     }
     if (options.optimizePrompt !== undefined) {
-      formData.append('optimize_prompt', options.optimizePrompt.toString())
+      formData.append('optimize_prompt', String(options.optimizePrompt))
     }
+  } else {
+    // AI 模式关闭时也发送 optimize_prompt 默认值
+    formData.append('optimize_prompt', 'true')
   }
   
   if (options?.rootTopic) {
     formData.append('root_topic', options.rootTopic)
   }
   
-  return api.post('/uploads/process', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
-  })
+  return api.post('/uploads/process', formData)
 }
 
 export const uploadText = (
@@ -138,7 +141,7 @@ export const uploadText = (
   title?: string, 
   autoProcess: boolean = true,
   options?: {
-    enableAI?: boolean
+    enable_ai_segmentation?: boolean
     userPrompt?: string
     optimizePrompt?: boolean
     rootTopic?: string
@@ -147,17 +150,14 @@ export const uploadText = (
   const payload: any = { 
     content, 
     title, 
-    auto_process: autoProcess 
+    auto_process: autoProcess,
+    // 始终发送 enable_ai_segmentation 字段
+    enable_ai_segmentation: options?.enable_ai_segmentation === true,
+    optimize_prompt: options?.optimizePrompt !== undefined ? options.optimizePrompt : true
   }
   
-  if (options?.enableAI) {
-    payload.enable_ai_segmentation = true
-    if (options.userPrompt) {
-      payload.user_prompt = options.userPrompt
-    }
-    if (options.optimizePrompt !== undefined) {
-      payload.optimize_prompt = options.optimizePrompt
-    }
+  if (options?.enable_ai_segmentation && options.userPrompt) {
+    payload.user_prompt = options.userPrompt
   }
   
   if (options?.rootTopic) {
@@ -172,7 +172,7 @@ export const uploadUrl = (
   title?: string, 
   autoProcess: boolean = true,
   options?: {
-    enableAI?: boolean
+    enable_ai_segmentation?: boolean
     userPrompt?: string
     optimizePrompt?: boolean
     rootTopic?: string
@@ -181,17 +181,14 @@ export const uploadUrl = (
   const payload: any = { 
     url, 
     title, 
-    auto_process: autoProcess 
+    auto_process: autoProcess,
+    // 始终发送 enable_ai_segmentation 字段
+    enable_ai_segmentation: options?.enable_ai_segmentation === true,
+    optimize_prompt: options?.optimizePrompt !== undefined ? options.optimizePrompt : true
   }
   
-  if (options?.enableAI) {
-    payload.enable_ai_segmentation = true
-    if (options.userPrompt) {
-      payload.user_prompt = options.userPrompt
-    }
-    if (options.optimizePrompt !== undefined) {
-      payload.optimize_prompt = options.optimizePrompt
-    }
+  if (options?.enable_ai_segmentation && options.userPrompt) {
+    payload.user_prompt = options.userPrompt
   }
   
   if (options?.rootTopic) {
@@ -253,7 +250,8 @@ export const listDocuments = (skip: number = 0, limit: number = 50, sortBy: stri
     params: {
       skip,
       limit,
-      sort_by: sortBy
+      sort_by: sortBy,
+      _: Date.now()  // 添加时间戳参数防止浏览器缓存
     }
   })
 

@@ -15,6 +15,7 @@ class ConfigService:
         
         Returns:
             Dictionary with runtime configuration values.
+            Environment variables take precedence over runtime configuration in Neo4j.
             Falls back to base_settings if not found in database or Neo4j not initialized.
         """
         # 如果 Neo4j 未初始化，直接返回环境变量配置
@@ -30,17 +31,18 @@ class ConfigService:
             
             if result and result[0].get("config"):
                 config_node = result[0]["config"]
+                # 环境变量优先于运行时配置
                 return {
-                    "ai_provider": config_node.get("ai_provider", base_settings.ai_provider),
-                    "ai_api_key": config_node.get("ai_api_key"),
-                    "ai_model": config_node.get("ai_model"),
-                    "ai_base_url": config_node.get("ai_base_url"),
+                    "ai_provider": base_settings.ai_provider or config_node.get("ai_provider"),
+                    "ai_api_key": base_settings.ai_api_key or config_node.get("ai_api_key"),
+                    "ai_model": base_settings.ai_model or config_node.get("ai_model"),
+                    "ai_base_url": base_settings.ai_base_url or config_node.get("ai_base_url"),
                     # 兼容性字段
-                    "openai_api_key": config_node.get("openai_api_key"),
-                    "openai_model": config_node.get("openai_model", base_settings.openai_model),
-                    "openai_base_url": config_node.get("openai_base_url"),
-                    "ollama_base_url": config_node.get("ollama_base_url", base_settings.ollama_base_url),
-                    "ollama_model": config_node.get("ollama_model", base_settings.ollama_model),
+                    "openai_api_key": base_settings.openai_api_key or config_node.get("openai_api_key"),
+                    "openai_model": base_settings.openai_model or config_node.get("openai_model"),
+                    "openai_base_url": base_settings.openai_base_url or config_node.get("openai_base_url"),
+                    "ollama_base_url": base_settings.ollama_base_url or config_node.get("ollama_base_url"),
+                    "ollama_model": base_settings.ollama_model or config_node.get("ollama_model"),
                 }
             else:
                 # 首次运行，从环境变量初始化

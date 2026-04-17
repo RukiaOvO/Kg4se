@@ -6,20 +6,6 @@
         <h1 class="page-title">文档管理</h1>
         <p class="page-subtitle">查看和管理已上传的文档</p>
       </div>
-      <div class="header-actions">
-        <n-button type="primary" @click="loadDocuments" :loading="loading">
-          <template #icon>
-            <n-icon><refresh-outline /></n-icon>
-          </template>
-          刷新列表
-        </n-button>
-        <n-button type="success" @click="$router.push('/upload')">
-          <template #icon>
-            <n-icon><cloud-upload-outline /></n-icon>
-          </template>
-          上传新文档
-        </n-button>
-      </div>
     </div>
 
     <!-- Content -->
@@ -122,23 +108,20 @@
                 style="width: 120px"
                 @update:value="loadDocuments"
               />
+
+              <!-- 刷新按钮 -->
+              <n-button type="primary" @click="loadDocuments" :loading="loading">
+                <template #icon>
+                  <n-icon><refresh-outline /></n-icon>
+                </template>
+                刷新
+              </n-button>
             </div>
           </div>
         </template>
 
         <n-spin :show="loading">
-          <div v-if="documents.length === 0" class="empty-state">
-            <n-empty description="暂无文档">
-              <template #extra>
-                <n-button type="primary" @click="$router.push('/upload')">
-                  上传第一个文档
-                </n-button>
-              </template>
-            </n-empty>
-          </div>
-
           <n-data-table
-            v-else
             :columns="columns"
             :data="documents"
             :pagination="pagination"
@@ -302,7 +285,6 @@ import {
 } from 'naive-ui'
 import {
   RefreshOutline,
-  CloudUploadOutline,
   DocumentTextOutline,
   CheckmarkCircleOutline,
   HourglassOutline,
@@ -709,11 +691,6 @@ loadDocuments()
   font-size: 14px;
   color: #999;
   margin: 0;
-}
-
-.header-actions {
-  display: flex;
-  gap: 12px;
 }
 
 .stats-grid {

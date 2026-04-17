@@ -420,14 +420,34 @@ async def get_document_graph(
     if not doc_check:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # First, get the specified number of unique nodes related to the document
+    # 获取文档节点及其关联节点（排除其他Document节点）
     node_query = f"""
     MATCH (d:Document {{id: $doc_id}})
-    MATCH (n)
-    WHERE n.id = $doc_id OR EXISTS((n)-[*1..{depth}]-(d))
-    RETURN n
+    OPTIONAL MATCH (d)-[*1..{depth}]-(n)
+    WHERE NOT (n:Document) OR n.id = $doc_id
+    WITH d, COLLECT(DISTINCT n) AS related_nodes
+    UNWIND related_nodes AS rn
+    RETURN rn AS n
+    UNION ALL
+    MATCH (d:Document {{id: $doc_id}})
+    RETURN d AS n
     ORDER BY CASE WHEN n.id = $doc_id THEN 0 ELSE 1 END
     LIMIT {limit}
+    """
+    
+    # 获取边（两个端点都在文档相关节点中，排除其他Document节点）
+    edge_query = f"""
+    MATCH (d:Document {{id: $doc_id}})
+    OPTIONAL MATCH (d)-[*1..{depth}]-(n)
+    WHERE NOT (n:Document) OR n.id = $doc_id
+    WITH d, COLLECT(DISTINCT n) AS related_nodes
+    WITH related_nodes + [d] AS all_nodes
+    UNWIND all_nodes AS source_node
+    UNWIND all_nodes AS target_node
+    MATCH (source_node)-[r]->(target_node)
+    WHERE source_node <> target_node
+    RETURN DISTINCT source_node AS n, r, target_node AS m
+    LIMIT {edge_limit}
     """
     
     node_results = neo4j_client.execute_query(node_query, {"doc_id": document_id})
@@ -480,26 +500,9 @@ async def get_document_graph(
     edges: List[Dict[str, Any]] = []
     edge_id_set: set = set()
     
-    # Get edges where both source and target are in our selected nodes
+    # Get edges related to the document (both endpoints must be related to the document)
     if node_id_set:
-        # Use element_id for more reliable edge matching
-        if node_element_ids:
-            edge_query = f"""
-            MATCH (n)-[r]->(m)
-            WHERE elementId(n) IN $element_ids AND elementId(m) IN $element_ids
-            RETURN n, r, m
-            LIMIT {edge_limit}
-            """
-            edge_results = neo4j_client.execute_query(edge_query, {"element_ids": list(node_element_ids)})
-        else:
-            # Fallback to property-based matching
-            edge_query = f"""
-            MATCH (n)-[r]->(m)
-            WHERE (n.id IN $node_ids OR n.name IN $node_ids) AND (m.id IN $node_ids OR m.name IN $node_ids)
-            RETURN n, r, m
-            LIMIT {edge_limit}
-            """
-            edge_results = neo4j_client.execute_query(edge_query, {"node_ids": list(node_id_set)})
+        edge_results = neo4j_client.execute_query(edge_query, {"doc_id": document_id})
         
         for record in edge_results:
             if "r" in record and record["r"]:

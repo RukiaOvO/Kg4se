@@ -351,7 +351,7 @@ async def ingest_document(
             enable_ai_segmentation,
             user_prompt,
             optimize_prompt,
-            job_timeout='1h'
+            timeout='1h'
         )
         
         if job:
