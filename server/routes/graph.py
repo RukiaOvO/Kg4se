@@ -29,6 +29,7 @@ def _clean_properties(props: Dict[str, Any]) -> Dict[str, Any]:
 @router.get("/visualize")
 async def visualize_graph(
     limit: int = Query(500, ge=10, le=10000, description="Maximum nodes to return"),
+    edge_limit: int = Query(1000, ge=10, le=50000, description="Maximum edges to return"),
     node_type: Optional[str] = Query(None, description="Filter by node type (Concept, Document, etc)"),
 ):
     """
@@ -38,82 +39,41 @@ async def visualize_graph(
     Automatically handles Neo4j type conversions (DateTime, Node objects, etc).
     """
     try:
-        # Build query based on filters
+        # First, get the specified number of unique nodes
         if node_type:
-            query = f"""
+            node_query = f"""
             MATCH (n:{node_type})
-            OPTIONAL MATCH (n)-[r]->(m)
-            WITH n, r, m
-            RETURN n, r, m
-            LIMIT {limit * 3}
+            RETURN n
+            ORDER BY CASE WHEN 'Document' IN labels(n) THEN 0 ELSE 1 END
+            LIMIT {limit}
             """
         else:
-            # Use a higher limit since records can contain duplicate nodes due to relationships
-            # First get documents to ensure they are included
-            query = f"""
+            node_query = f"""
             MATCH (n)
-            OPTIONAL MATCH (n)-[r]->(m)
-            WITH n, r, m
+            RETURN n
             ORDER BY CASE WHEN 'Document' IN labels(n) THEN 0 ELSE 1 END
-            RETURN n, r, m
-            LIMIT {limit * 3}
+            LIMIT {limit}
             """
         
-        results = neo4j_client.execute_query(query)
+        node_results = neo4j_client.execute_query(node_query)
         
-        # Process results into nodes and edges
+        # Collect node info and build nodes_dict
         nodes_dict: Dict[str, Dict[str, Any]] = {}
-        edges: List[Dict[str, Any]] = []
+        node_id_set: set = set()
+        node_element_ids: set = set()
         
-        for record in results:
-            # Process source node (n)
+        for record in node_results:
             if "n" in record and record["n"]:
                 node = record["n"]
                 node_props = dict(node) if isinstance(node, dict) else node
-                # Convert Neo4j types in properties
                 node_props = neo4j_client._convert_neo4j_types(node_props)
                 labels = list(node.labels) if hasattr(node, "labels") else []
                 
-                # 如果没有标签，根据属性推断类型
                 if not labels:
                     if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
                         labels = ["Document"]
-                    elif node_props.get("type") == "concept":
-                        labels = ["Concept"]
-                    elif node_props.get("type") == "entity":
-                        labels = ["Entity"]
-                    else:
-                        labels = ["Concept"]
-                
-                # Create unique node ID
-                node_id = node_props.get("id") or node_props.get("name")
-                if not node_id:
-                    node_id = getattr(node, "element_id", None) or str(id(node))
-                
-                node_id = str(node_id)
-                
-                if node_id not in nodes_dict:
-                    nodes_dict[node_id] = {
-                        "id": node_id,
-                        "labels": labels,
-                        "type": labels[0] if labels else "Unknown",
-                        "label": node_props.get("name") or node_props.get("filename") or node_id,
-                        "properties": node_props,
-                        "degree": 0  # Will be updated based on relationships
-                    }
-            
-            # Process target node (m)
-            if "m" in record and record["m"]:
-                node = record["m"]
-                node_props = dict(node) if isinstance(node, dict) else node
-                # Convert Neo4j types in properties
-                node_props = neo4j_client._convert_neo4j_types(node_props)
-                labels = list(node.labels) if hasattr(node, "labels") else []
-                
-                # 如果没有标签，根据属性推断类型
-                if not labels:
-                    if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
-                        labels = ["Document"]
+                    elif node_props.get("type") == "chunk" or (node_props.get("chunk_id") is not None):
+                        labels = ["Chunk"]
                     elif node_props.get("type") == "concept":
                         labels = ["Concept"]
                     elif node_props.get("type") == "entity":
@@ -126,58 +86,89 @@ async def visualize_graph(
                     node_id = getattr(node, "element_id", None) or str(id(node))
                 
                 node_id = str(node_id)
+                node_id_set.add(node_id)
                 
-                if node_id not in nodes_dict:
-                    nodes_dict[node_id] = {
-                        "id": node_id,
-                        "labels": labels,
-                        "type": labels[0] if labels else "Unknown",
-                        "label": node_props.get("name") or node_props.get("filename") or node_id,
-                        "properties": node_props,
-                        "degree": 0
-                    }
+                # Also collect Neo4j internal element_id for edge query
+                element_id = getattr(node, "element_id", None)
+                if element_id:
+                    node_element_ids.add(element_id)
+                
+                nodes_dict[node_id] = {
+                    "id": node_id,
+                    "labels": labels,
+                    "type": labels[0] if labels else "Unknown",
+                    "label": node_props.get("name") or node_props.get("filename") or node_id,
+                    "properties": node_props,
+                    "degree": 0
+                }
+        
+        edges: List[Dict[str, Any]] = []
+        edge_id_set: set = set()
+        
+        # Get edges where both source and target are in our selected nodes
+        if node_id_set:
+            # Use element_id for more reliable edge matching
+            if node_element_ids:
+                edge_query = f"""
+                MATCH (n)-[r]->(m)
+                WHERE elementId(n) IN $element_ids AND elementId(m) IN $element_ids
+                RETURN n, r, m
+                LIMIT {edge_limit}
+                """
+                edge_results = neo4j_client.execute_query(edge_query, {"element_ids": list(node_element_ids)})
+            else:
+                # Fallback to property-based matching
+                edge_query = f"""
+                MATCH (n)-[r]->(m)
+                WHERE (n.id IN $node_ids OR n.name IN $node_ids) AND (m.id IN $node_ids OR m.name IN $node_ids)
+                RETURN n, r, m
+                LIMIT {edge_limit}
+                """
+                edge_results = neo4j_client.execute_query(edge_query, {"node_ids": list(node_id_set)})
             
-            # Process relationship (r)
-            if "r" in record and record["r"]:
-                rel = record["r"]
-                source_node = record.get("n")
-                target_node = record.get("m")
-                
-                if source_node and target_node:
-                    # Get source node ID
-                    source_props = dict(source_node) if isinstance(source_node, dict) else source_node
-                    source_id = source_props.get("id") or source_props.get("name")
-                    if not source_id:
-                        source_id = getattr(source_node, "element_id", None) or str(id(source_node))
-                    source_id = str(source_id)
+            for record in edge_results:
+                if "r" in record and record["r"]:
+                    rel = record["r"]
+                    source_node = record.get("n")
+                    target_node = record.get("m")
                     
-                    # Get target node ID
-                    target_props = dict(target_node) if isinstance(target_node, dict) else target_node
-                    target_id = target_props.get("id") or target_props.get("name")
-                    if not target_id:
-                        target_id = getattr(target_node, "element_id", None) or str(id(target_node))
-                    target_id = str(target_id)
-                    
-                    # Get relationship type and properties
-                    rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
-                    rel_props = dict(rel) if isinstance(rel, dict) else rel
-                    # Convert Neo4j types in relationship properties
-                    rel_props = neo4j_client._convert_neo4j_types(rel_props)
-                    
-                    edges.append({
-                        "id": f"{source_id}_{rel_type}_{target_id}",
-                        "source": source_id,
-                        "target": target_id,
-                        "type": rel_type,
-                        "label": rel_type,
-                        "properties": rel_props
-                    })
-                    
-                    # Update degree for both nodes
-                    if source_id in nodes_dict:
-                        nodes_dict[source_id]["degree"] += 1
-                    if target_id in nodes_dict:
-                        nodes_dict[target_id]["degree"] += 1
+                    if source_node and target_node:
+                        source_props = dict(source_node) if isinstance(source_node, dict) else source_node
+                        source_id = source_props.get("id") or source_props.get("name")
+                        if not source_id:
+                            source_id = getattr(source_node, "element_id", None) or str(id(source_node))
+                        source_id = str(source_id)
+                        
+                        target_props = dict(target_node) if isinstance(target_node, dict) else target_node
+                        target_id = target_props.get("id") or target_props.get("name")
+                        if not target_id:
+                            target_id = getattr(target_node, "element_id", None) or str(id(target_node))
+                        target_id = str(target_id)
+                        
+                        # Only add edges where both endpoints are in our selected nodes
+                        if source_id in node_id_set and target_id in node_id_set:
+                            rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
+                            edge_unique_id = f"{source_id}_{rel_type}_{target_id}"
+                            
+                            # Avoid duplicate edges
+                            if edge_unique_id not in edge_id_set:
+                                edge_id_set.add(edge_unique_id)
+                                rel_props = dict(rel) if isinstance(rel, dict) else rel
+                                rel_props = neo4j_client._convert_neo4j_types(rel_props)
+                                
+                                edges.append({
+                                    "id": edge_unique_id,
+                                    "source": source_id,
+                                    "target": target_id,
+                                    "type": rel_type,
+                                    "label": rel_type,
+                                    "properties": rel_props
+                                })
+                                
+                                if source_id in nodes_dict:
+                                    nodes_dict[source_id]["degree"] += 1
+                                if target_id in nodes_dict:
+                                    nodes_dict[target_id]["degree"] += 1
         
         # Prepare response
         nodes = list(nodes_dict.values())
@@ -404,7 +395,9 @@ async def get_edges(
 @router.get("/documents/{document_id}/graph", response_model=GraphResponse)
 async def get_document_graph(
     document_id: str,
-    depth: int = Query(2, ge=1, le=5, description="Relationship depth")
+    depth: int = Query(2, ge=1, le=5, description="Relationship depth"),
+    limit: int = Query(500, ge=10, le=10000, description="Maximum nodes to return"),
+    edge_limit: int = Query(1000, ge=10, le=50000, description="Maximum edges to return")
 ):
     """
     获取指定文档的知识图谱。
@@ -412,6 +405,8 @@ async def get_document_graph(
     Args:
         document_id: 文档 ID
         depth: 关系深度（1-5）
+        limit: 最大返回节点数
+        edge_limit: 最大返回边数
         
     Returns:
         包含节点和边的图谱数据
@@ -425,74 +420,35 @@ async def get_document_graph(
     if not doc_check:
         raise HTTPException(status_code=404, detail="Document not found")
     
-    # 使用简单直接的查询，与全局图谱API完全相同的返回格式
-    # 查询文档节点以及所有与文档相关的节点和关系
-    # 先匹配文档节点，然后使用 WITH 传递，避免在 EXISTS 中引入新变量
-    query = f"""
+    # First, get the specified number of unique nodes related to the document
+    node_query = f"""
     MATCH (d:Document {{id: $doc_id}})
     MATCH (n)
     WHERE n.id = $doc_id OR EXISTS((n)-[*1..{depth}]-(d))
-    OPTIONAL MATCH (n)-[r]->(m)
-    WHERE m.id = $doc_id OR EXISTS((m)-[*1..{depth}]-(d)) OR m IS NULL
-    RETURN n, r, m
-    LIMIT 500
+    RETURN n
+    ORDER BY CASE WHEN n.id = $doc_id THEN 0 ELSE 1 END
+    LIMIT {limit}
     """
     
-    results = neo4j_client.execute_query(query, {"doc_id": document_id})
+    node_results = neo4j_client.execute_query(node_query, {"doc_id": document_id})
     
-    # 完全复制全局图谱API的处理逻辑
+    # Collect node info and build nodes_dict
     nodes_dict: Dict[str, Dict[str, Any]] = {}
-    edges: List[Dict[str, Any]] = []
+    node_id_set: set = set()
+    node_element_ids: set = set()
     
-    for record in results:
-        # Process source node (n)
+    for record in node_results:
         if "n" in record and record["n"]:
             node = record["n"]
             node_props = dict(node) if isinstance(node, dict) else node
-            # Convert Neo4j types in properties
             node_props = neo4j_client._convert_neo4j_types(node_props)
             labels = list(node.labels) if hasattr(node, "labels") else []
             
-            # 如果没有标签，根据属性推断类型
             if not labels:
                 if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
                     labels = ["Document"]
-                elif node_props.get("type") == "concept":
-                    labels = ["Concept"]
-                elif node_props.get("type") == "entity":
-                    labels = ["Entity"]
-                else:
-                    labels = ["Concept"]
-            
-            # Create unique node ID
-            node_id = node_props.get("id") or node_props.get("name")
-            if not node_id:
-                node_id = getattr(node, "element_id", None) or str(id(node))
-            
-            node_id = str(node_id)
-            
-            if node_id not in nodes_dict:
-                nodes_dict[node_id] = {
-                    "id": node_id,
-                    "labels": labels,
-                    "type": labels[0] if labels else "Unknown",
-                    "label": node_props.get("name") or node_props.get("filename") or node_id,
-                    "properties": node_props,
-                    "degree": 0  # Will be updated based on relationships
-                }
-        
-        # Process target node (m)
-        if "m" in record and record["m"]:
-            node = record["m"]
-            node_props = dict(node) if isinstance(node, dict) else node
-            # Convert Neo4j types in properties
-            node_props = neo4j_client._convert_neo4j_types(node_props)
-            labels = list(node.labels) if hasattr(node, "labels") else []
-            
-            # 如果没有标签，根据属性推断类型
-            if not labels:
-                if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
-                    labels = ["Document"]
+                elif node_props.get("type") == "chunk" or (node_props.get("chunk_id") is not None):
+                    labels = ["Chunk"]
                 elif node_props.get("type") == "concept":
                     labels = ["Concept"]
                 elif node_props.get("type") == "entity":
@@ -505,58 +461,89 @@ async def get_document_graph(
                 node_id = getattr(node, "element_id", None) or str(id(node))
             
             node_id = str(node_id)
+            node_id_set.add(node_id)
             
-            if node_id not in nodes_dict:
-                nodes_dict[node_id] = {
-                    "id": node_id,
-                    "labels": labels,
-                    "type": labels[0] if labels else "Unknown",
-                    "label": node_props.get("name") or node_props.get("filename") or node_id,
-                    "properties": node_props,
-                    "degree": 0
-                }
+            # Also collect Neo4j internal element_id for edge query
+            element_id = getattr(node, "element_id", None)
+            if element_id:
+                node_element_ids.add(element_id)
+            
+            nodes_dict[node_id] = {
+                "id": node_id,
+                "labels": labels,
+                "type": labels[0] if labels else "Unknown",
+                "label": node_props.get("name") or node_props.get("filename") or node_id,
+                "properties": node_props,
+                "degree": 0
+            }
+    
+    edges: List[Dict[str, Any]] = []
+    edge_id_set: set = set()
+    
+    # Get edges where both source and target are in our selected nodes
+    if node_id_set:
+        # Use element_id for more reliable edge matching
+        if node_element_ids:
+            edge_query = f"""
+            MATCH (n)-[r]->(m)
+            WHERE elementId(n) IN $element_ids AND elementId(m) IN $element_ids
+            RETURN n, r, m
+            LIMIT {edge_limit}
+            """
+            edge_results = neo4j_client.execute_query(edge_query, {"element_ids": list(node_element_ids)})
+        else:
+            # Fallback to property-based matching
+            edge_query = f"""
+            MATCH (n)-[r]->(m)
+            WHERE (n.id IN $node_ids OR n.name IN $node_ids) AND (m.id IN $node_ids OR m.name IN $node_ids)
+            RETURN n, r, m
+            LIMIT {edge_limit}
+            """
+            edge_results = neo4j_client.execute_query(edge_query, {"node_ids": list(node_id_set)})
         
-        # Process relationship (r)
-        if "r" in record and record["r"]:
-            rel = record["r"]
-            source_node = record.get("n")
-            target_node = record.get("m")
-            
-            if source_node and target_node:
-                # Get source node ID
-                source_props = dict(source_node) if isinstance(source_node, dict) else source_node
-                source_id = source_props.get("id") or source_props.get("name")
-                if not source_id:
-                    source_id = getattr(source_node, "element_id", None) or str(id(source_node))
-                source_id = str(source_id)
+        for record in edge_results:
+            if "r" in record and record["r"]:
+                rel = record["r"]
+                source_node = record.get("n")
+                target_node = record.get("m")
                 
-                # Get target node ID
-                target_props = dict(target_node) if isinstance(target_node, dict) else target_node
-                target_id = target_props.get("id") or target_props.get("name")
-                if not target_id:
-                    target_id = getattr(target_node, "element_id", None) or str(id(target_node))
-                target_id = str(target_id)
-                
-                # Get relationship type and properties
-                rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
-                rel_props = dict(rel) if isinstance(rel, dict) else rel
-                # Convert Neo4j types in relationship properties
-                rel_props = neo4j_client._convert_neo4j_types(rel_props)
-                
-                edges.append({
-                    "id": f"{source_id}_{rel_type}_{target_id}",
-                    "source": source_id,
-                    "target": target_id,
-                    "type": rel_type,
-                    "label": rel_type,
-                    "properties": rel_props
-                })
-                
-                # Update degree for both nodes
-                if source_id in nodes_dict:
-                    nodes_dict[source_id]["degree"] += 1
-                if target_id in nodes_dict:
-                    nodes_dict[target_id]["degree"] += 1
+                if source_node and target_node:
+                    source_props = dict(source_node) if isinstance(source_node, dict) else source_node
+                    source_id = source_props.get("id") or source_props.get("name")
+                    if not source_id:
+                        source_id = getattr(source_node, "element_id", None) or str(id(source_node))
+                    source_id = str(source_id)
+                    
+                    target_props = dict(target_node) if isinstance(target_node, dict) else target_node
+                    target_id = target_props.get("id") or target_props.get("name")
+                    if not target_id:
+                        target_id = getattr(target_node, "element_id", None) or str(id(target_node))
+                    target_id = str(target_id)
+                    
+                    # Only add edges where both endpoints are in our selected nodes
+                    if source_id in node_id_set and target_id in node_id_set:
+                        rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
+                        edge_unique_id = f"{source_id}_{rel_type}_{target_id}"
+                        
+                        # Avoid duplicate edges
+                        if edge_unique_id not in edge_id_set:
+                            edge_id_set.add(edge_unique_id)
+                            rel_props = dict(rel) if isinstance(rel, dict) else rel
+                            rel_props = neo4j_client._convert_neo4j_types(rel_props)
+                            
+                            edges.append({
+                                "id": edge_unique_id,
+                                "source": source_id,
+                                "target": target_id,
+                                "type": rel_type,
+                                "label": rel_type,
+                                "properties": rel_props
+                            })
+                            
+                            if source_id in nodes_dict:
+                                nodes_dict[source_id]["degree"] += 1
+                            if target_id in nodes_dict:
+                                nodes_dict[target_id]["degree"] += 1
 
     
     # 标记文档状态为已处理（即在图中可见）

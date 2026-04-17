@@ -283,10 +283,12 @@ export const getGraphDataByType = (nodeType: string, limit: number = 500): Promi
   })
 
 // Graph by document
-export const getDocumentGraph = (documentId: string, depth: number = 2): Promise<any> =>
+export const getDocumentGraph = (documentId: string, depth: number = 2, limit: number = 500, edgeLimit: number = 1000): Promise<any> =>
   api.get(`/graph/documents/${documentId}/graph`, {
     params: {
-      depth: Math.max(1, Math.min(depth, 5))
+      depth: Math.max(1, Math.min(depth, 5)),
+      limit: Math.min(limit, 10000),
+      edge_limit: Math.min(edgeLimit, 50000)
     }
   })
 

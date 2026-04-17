@@ -504,7 +504,7 @@ const loadGraph = async () => {
     const docId = currentDocumentId.value
 
     const result = docId
-      ? await getDocumentGraph(docId, documentDepth.value)
+      ? await getDocumentGraph(docId, documentDepth.value, nodeLimit.value)
       : await getGraphData(nodeLimit.value)
     
     if (!result) {
