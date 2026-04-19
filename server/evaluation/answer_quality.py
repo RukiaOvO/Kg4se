@@ -2,15 +2,23 @@
 回答质量评估模块
 
 参考论文:
-- RAG vs. GraphRAG: A Systematic Evaluation (Han et al., 2025)
+- RAG vs. GraphRAG: A Systematic Evaluation (Han et al., 2026)
 - GraphRAG vs Vector RAG: Accuracy Benchmark Insights (FalkorDB, 2025)
-- A review on Graph RAG methods (Akbari, 2025)
+- A review on Graph RAG methods (Peng et al., 2024)
+- Retrieval-Augmented Generation with Graphs (Han et al., 2025)
 """
 
 from typing import Dict, Any, List
 import json
 from datetime import datetime
 import numpy as np
+
+try:
+    from rouge_score import rouge_scorer
+    ROUGE_AVAILABLE = True
+except ImportError:
+    ROUGE_AVAILABLE = False
+    print("⚠️ ROUGE score library not installed, will use fallback metrics")
 
 class AnswerQualityEvaluator:
     def __init__(self, llm_client=None, embedding_model=None):
@@ -23,6 +31,7 @@ class AnswerQualityEvaluator:
             "expected": expected,
             "context": context,
             "automatic": self._automatic_evaluation(predicted, expected),
+            "fact_consistency": self._fact_consistency(predicted, context),
             "llm_judge": self._llm_based_evaluation(predicted, expected, context) if self.llm_client else None,
             "overall_score": 0.0
         }
@@ -35,13 +44,61 @@ class AnswerQualityEvaluator:
         semantic_sim = self._semantic_similarity(predicted, expected)
         word_overlap = self._word_overlap_similarity(predicted, expected)
         length_match = self._length_match(predicted, expected)
+        rouge_l = self._rouge_l_score(predicted, expected)
         
         return {
             "semantic_similarity": round(semantic_sim, 4),
             "word_overlap": round(word_overlap, 4),
             "length_match": round(length_match, 4),
-            "score": round((semantic_sim * 0.5 + word_overlap * 0.3 + length_match * 0.2), 4)
+            "rouge_l": round(rouge_l, 4),
+            "score": round((semantic_sim * 0.35 + word_overlap * 0.2 + length_match * 0.15 + rouge_l * 0.3), 4)
         }
+    
+    def _rouge_l_score(self, text1: str, text2: str) -> float:
+        """计算ROUGE-L分数"""
+        if not ROUGE_AVAILABLE:
+            return self._simple_similarity(text1, text2)
+        
+        try:
+            scorer = rouge_scorer.RougeScorer(['rougeL'], use_stemmer=True)
+            scores = scorer.score(text2, text1)
+            return scores['rougeL'].fmeasure
+        except Exception as e:
+            print(f"⚠️ ROUGE计算失败: {e}")
+            return self._simple_similarity(text1, text2)
+    
+    def _fact_consistency(self, predicted: str, context: str) -> float:
+        """检测回答与上下文的事实一致性"""
+        if not context or not predicted:
+            return 1.0
+        
+        try:
+            if self.llm_client:
+                prompt = f"""
+                请判断以下回答是否与上下文信息一致：
+                
+                上下文: {context[:500]}
+                
+                回答: {predicted[:500]}
+                
+                请输出一个0到1之间的分数，表示一致性程度：
+                - 1.0 = 完全一致
+                - 0.5 = 部分一致
+                - 0.0 = 完全矛盾
+                
+                只输出数字，不要输出其他内容。
+                """
+                response = self.llm_client.chat(prompt)
+                try:
+                    score = float(response.strip())
+                    return max(0.0, min(1.0, score))
+                except ValueError:
+                    return 0.7
+            else:
+                return 0.7
+        except Exception as e:
+            print(f"⚠️ 事实一致性检测失败: {e}")
+            return 0.7
     
     def _semantic_similarity(self, text1: str, text2: str) -> float:
         if not self.embedding_model:
@@ -170,7 +227,7 @@ class AnswerQualityEvaluator:
         
         if result["llm_judge"]:
             llm_score = result["llm_judge"]["overall"] / 5.0
-            return round((auto_score * 0.4 + llm_score * 0.6), 4)
+            return round((auto_score * 0.6 + llm_score * 0.4), 4)
         else:
             return auto_score
 

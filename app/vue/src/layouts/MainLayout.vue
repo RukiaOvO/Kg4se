@@ -116,14 +116,7 @@ const menuOptions = computed(() => [
     label: t('navigation.graph_visualization'),
     key: '/graph'
   },
-  {
-    label: t('navigation.query'),
-    key: '/query'
-  },
-  {
-    label: t('navigation.status'),
-    key: '/status'
-  },
+  
   {
     label: t('navigation.evaluation'),
     key: '/evaluation'

@@ -172,16 +172,7 @@
             <n-icon class="action-arrow" size="16"><arrow-forward-outline /></n-icon>
           </div>
 
-          <div class="action-card" @click="$router.push('/query')">
-            <div class="action-icon" style="background: linear-gradient(135deg, #b8860b, #8b6914);">
-              <n-icon size="28"><search-outline /></n-icon>
-            </div>
-            <div class="action-content">
-              <div class="action-title">知识查询</div>
-              <div class="action-desc">使用 Cypher 查询图谱</div>
-            </div>
-            <n-icon class="action-arrow" size="16"><arrow-forward-outline /></n-icon>
-          </div>
+          
 
           <div class="action-card" @click="handleAsk">
             <div class="action-icon" style="background: linear-gradient(135deg, #daa520, #c9a668);">

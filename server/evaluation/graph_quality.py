@@ -203,18 +203,18 @@ class GraphQualityEvaluator:
     def _calculate_modularity(self) -> float:
         try:
             result = self.neo4j_client.execute_query("""
-                CALL gds.louvain.stream({
+                CALL gds.louvain.stats({
                     nodeProjection: '*',
                     relationshipProjection: '*'
                 })
-                YIELD nodeId, communityId, intermediateCommunityIds
-                WITH count(DISTINCT communityId) as communities
-                RETURN CASE WHEN communities > 1 THEN 0.5 ELSE 0.3 END as modularity
+                YIELD modularity
+                RETURN modularity
             """)
             if result and result[0] and "modularity" in result[0]:
                 return float(result[0]["modularity"])
             return 0.5
-        except Exception:
+        except Exception as e:
+            print(f"⚠️ 模块化度计算失败，使用默认值: {e}")
             return 0.5
     
     def _validate_triplet(self, triplet: Dict[str, Any]) -> bool:

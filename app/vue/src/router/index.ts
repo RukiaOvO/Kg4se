@@ -36,18 +36,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Graph.vue'),
         meta: { title: 'graph.title' }
       },
-      {
-        path: 'query',
-        name: 'Query',
-        component: () => import('@/views/Query.vue'),
-        meta: { title: 'query.title' }
-      },
-      {
-        path: 'status',
-        name: 'Status',
-        component: () => import('@/views/Status.vue'),
-        meta: { title: 'status.title' }
-      },
+      
       {
         path: 'settings',
         name: 'Settings',
