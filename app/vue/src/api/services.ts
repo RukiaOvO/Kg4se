@@ -386,10 +386,12 @@ export interface Message {
   content: string
 }
 
+export type QAMode = 'graphrag' | 'rag' | 'llm'
+
 export interface AskRequest {
   question: string
   conversation_history?: Message[]
-  use_kg?: boolean
+  mode?: QAMode
 }
 
 export interface AskResponse {

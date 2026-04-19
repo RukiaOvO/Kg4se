@@ -46,23 +46,28 @@ class GraphQualityEvaluator:
         connected_components = self._count_connected_components()
         modularity = self._calculate_modularity()
         
+        max_edges_undirected = node_count * (node_count - 1) / 2 if node_count > 1 else 1
+        density = edge_count / max_edges_undirected if max_edges_undirected > 0 else 0
+        
         result = {
             "node_count": node_count,
             "edge_count": edge_count,
             "avg_degree": round(avg_degree, 2),
             "connected_components": connected_components,
             "modularity": round(modularity, 4),
-            "density": round(edge_count / (node_count * (node_count - 1)) if node_count > 1 else 0, 4),
+            "density": round(density, 4),
             "metrics": {
                 "node_count_score": self._score_node_count(node_count),
                 "avg_degree_score": self._score_avg_degree(avg_degree),
                 "connected_components_score": self._score_connected_components(connected_components),
-                "modularity_score": self._score_modularity(modularity)
+                "modularity_score": self._score_modularity(modularity),
+                "density_score": self._score_density(density)
             }
         }
         
         print(f"   节点数: {node_count}, 边数: {edge_count}, 平均度数: {result['avg_degree']}")
         print(f"   连通分量: {connected_components}, 模块化度: {result['modularity']}")
+        print(f"   图谱密度: {result['density']:.4f}")
         
         return result
     
@@ -272,6 +277,18 @@ class GraphQualityEvaluator:
         else:
             return 0.5
     
+    def _score_density(self, density: float) -> float:
+        if density >= 0.05:
+            return 1.0
+        elif density >= 0.02:
+            return 0.8
+        elif density >= 0.01:
+            return 0.6
+        elif density >= 0.005:
+            return 0.4
+        else:
+            return 0.2
+    
     def _score_valid_ratio(self, ratio: float) -> float:
         if ratio >= 0.9:
             return 1.0
@@ -340,21 +357,41 @@ class GraphQualityEvaluator:
     
     def _generate_recommendations(self, results: Dict[str, Any]) -> List[str]:
         recommendations = []
+        struct = results["structural_quality"]
+        content = results["content_quality"]
+        efficiency = results["construction_efficiency"]
         
-        if results["structural_quality"]["connected_components"] > 1:
-            recommendations.append("图谱存在多个连通分量，建议检查实体链接质量")
+        if struct["connected_components"] > 1:
+            recommendations.append(f"图谱存在 {struct['connected_components']} 个连通分量，建议检查实体链接质量或增加跨文档关联")
         
-        if results["structural_quality"]["avg_degree"] < 3:
-            recommendations.append("图谱密度较低，建议增加实体链接和关系抽取的召回率")
+        density = struct["density"]
+        if density < 0.005:
+            recommendations.append("图谱密度极低，建议：1) 增加输入文档数量；2) 优化实体链接策略；3) 调整关系抽取阈值提高召回率")
+        elif density < 0.01:
+            recommendations.append("图谱密度较低，建议增加文档数量或优化实体链接配置")
         
-        if results["content_quality"]["valid_ratio"] < 0.8:
-            recommendations.append("三元组有效率较低，建议加强 NLI 验证")
+        if struct["avg_degree"] < 2:
+            recommendations.append("节点平均度数偏低，考虑增加文档间的概念关联")
+        elif struct["avg_degree"] > 15:
+            recommendations.append("节点平均度数偏高，可能存在冗余连接，建议进行关系去重")
         
-        if results["content_quality"]["predicate_diversity"] < 5:
-            recommendations.append("谓词类型较少，建议扩展谓词治理规则")
+        if content["valid_ratio"] < 0.7:
+            recommendations.append("三元组有效率较低（<70%），建议加强 NLI 验证或调整置信度阈值")
+        elif content["valid_ratio"] < 0.85:
+            recommendations.append("三元组有效率有待提升，建议优化关系抽取模型")
         
-        if results["construction_efficiency"]["avg_time_per_document"] > 30:
-            recommendations.append("文档处理时间较长，建议优化构建流程")
+        if content["predicate_diversity"] < 3:
+            recommendations.append("谓词类型非常少，建议扩展谓词治理规则或增加多样化的输入文档")
+        elif content["predicate_diversity"] < 5:
+            recommendations.append("谓词多样性一般，建议引入更多类型的关系模式")
+        
+        if content["avg_confidence"] < 0.7:
+            recommendations.append("平均置信度较低，建议调整关系抽取的置信度阈值")
+        
+        if efficiency["avg_time_per_document"] > 60:
+            recommendations.append("文档处理时间较长（>60秒/文档），建议优化构建流程或增加并行处理")
+        elif efficiency["avg_time_per_document"] > 30:
+            recommendations.append("文档处理时间偏长，建议检查 LLM 调用效率")
         
         if not recommendations:
             recommendations.append("图谱质量良好，继续保持")

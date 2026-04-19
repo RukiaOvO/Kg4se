@@ -76,25 +76,22 @@ async def evaluate_answer_quality(request: AnswerEvaluationRequest):
         
         # Get GraphRAG answer (with knowledge graph)
         logger.info("   获取 GraphRAG 回答...")
-        graphrag_result = qa_service.answer_question(
-            question=request.question,
-            use_kg=True
+        graphrag_result = qa_service.answer_with_graphrag(
+            question=request.question
         )
         graphrag_answer = graphrag_result.get("answer", "回答失败")
         
-        # Get RAG answer (without knowledge graph)
+        # Get RAG answer (with vector database)
         logger.info("   获取 RAG 回答...")
-        rag_result = qa_service.answer_question(
-            question=request.question,
-            use_kg=False
+        rag_result = qa_service.answer_with_rag(
+            question=request.question
         )
         rag_answer = rag_result.get("answer", "回答失败")
         
-        # Get LLM answer (direct call)
+        # Get LLM answer (direct call without context)
         logger.info("   获取 LLM 回答...")
-        llm_result = qa_service.answer_question(
-            question=request.question,
-            use_kg=False
+        llm_result = qa_service.answer_with_llm(
+            question=request.question
         )
         llm_answer = llm_result.get("answer", "回答失败")
         

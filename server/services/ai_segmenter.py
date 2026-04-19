@@ -190,7 +190,7 @@ class AISegmenter:
             "description": "详细描述（用你的理解总结，不是照抄原文）",
             "domain": "所属领域",
             "category": "概念类型（如：理论/方法/工具/人物/事件等）",
-            "attributes": {{"属性名": "属性值"}},
+            "attributes": {{"属性名": "属性值（必须是字符串，不能是嵌套对象）"}},
             "aliases": ["别名1", "别名2"],
             "importance": "high/medium/low"
         }}

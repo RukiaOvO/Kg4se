@@ -616,6 +616,37 @@ const loadGraph = async () => {
             ...edge.properties
           }
         }))
+
+      // Filter isolated nodes (always enabled)
+      if (edges.length > 0) {
+        const connectedNodeIds = new Set<string>()
+        edges.forEach((edge: any) => {
+          connectedNodeIds.add(edge.data.source)
+          connectedNodeIds.add(edge.data.target)
+        })
+        
+        nodes = nodes.filter((node: any) => connectedNodeIds.has(node.data.id))
+      }
+      
+      // Re-process edges to ensure they only connect valid nodes
+      const finalNodeIds = new Set(nodes.map((n: any) => n.data.id))
+      edges = edges.filter((edge: any) => {
+        const sourceValid = finalNodeIds.has(edge.data.source)
+        const targetValid = finalNodeIds.has(edge.data.target)
+        return sourceValid && targetValid
+      })
+    } else {
+      edges = result.edges
+        .map((edge: any) => ({
+          data: {
+            id: edge.id || `${edge.source}-${edge.target}-${edge.type}`,
+            source: edge.source,
+            target: edge.target,
+            label: edge.label || edge.type,
+            type: edge.type,
+            ...edge.properties
+          }
+        }))
     }
 
     graphData.value = { nodes, edges }

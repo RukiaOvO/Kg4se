@@ -133,7 +133,12 @@ class GraphService:
             }
             
             if concept.get("attributes"):
-                properties.update(concept["attributes"])
+                attrs = concept["attributes"]
+                for key, value in attrs.items():
+                    if isinstance(value, dict):
+                        properties[key] = json.dumps(value)
+                    else:
+                        properties[key] = value
             
             self.neo4j_client.execute_query(
                 """

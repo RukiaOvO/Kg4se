@@ -14,13 +14,22 @@ from graphrag.config import get_config, ConstraintResult, GovernanceStatus
 
 logger = logging.getLogger("graphrag.stage5")
 
-# 仅允许的5种谓词（软件工程领域）
+# 允许的谓词集合（软件工程领域）
 ALLOWED_PREDICATES = {
     "BELONGS_TO",      # 子知识点属于父知识点
     "FROM",            # 知识点从文档中提取
     "PRACTICES_IS",    # 题目中提到知识点
     "HAS_TIMESTAMP",   # 文档的更新时间戳
-    "IS"               # 知识点的内容是什么
+    "IS",              # 知识点的内容是什么
+    
+    # 新增软件工程领域常见关系
+    "USES",            # 使用某种方法/工具
+    "IMPLEMENTS",      # 实现某个概念
+    "COMPARES_WITH",   # 比较关系
+    "DEPENDS_ON",      # 依赖关系
+    "CONTAINS",        # 包含关系
+    "RELATES_TO",      # 相关关系
+    "MENTIONS"         # 提到/引用
 }
 
 
@@ -136,7 +145,7 @@ class PredicateGovernor:
     
     def _map_to_allowed_predicate(self, predicate: str) -> Optional[str]:
         """
-        尝试将自然语言谓词映射到5种允许的谓词之一
+        尝试将自然语言谓词映射到允许的谓词之一
         
         Args:
             predicate: 原始谓词
@@ -156,6 +165,9 @@ class PredicateGovernor:
             "属于...知识点": "BELONGS_TO",
             "is_a": "BELONGS_TO",
             "subclass_of": "BELONGS_TO",
+            "子类": "BELONGS_TO",
+            "分类": "BELONGS_TO",
+            "归类": "BELONGS_TO",
             
             # FROM 映射
             "来自": "FROM",
@@ -166,6 +178,8 @@ class PredicateGovernor:
             "在...中提到": "FROM",
             "extracted_from": "FROM",
             "mentioned_in": "FROM",
+            "出自": "FROM",
+            "来自文档": "FROM",
             
             # PRACTICES_IS 映射
             "题目包含": "PRACTICES_IS",
@@ -175,6 +189,8 @@ class PredicateGovernor:
             "用于...练习": "PRACTICES_IS",
             "practiced_in": "PRACTICES_IS",
             "used_in_exercise": "PRACTICES_IS",
+            "应用于": "PRACTICES_IS",
+            "应用场景": "PRACTICES_IS",
             
             # HAS_TIMESTAMP 映射
             "更新于": "HAS_TIMESTAMP",
@@ -184,6 +200,7 @@ class PredicateGovernor:
             "timestamp": "HAS_TIMESTAMP",
             "updated_at": "HAS_TIMESTAMP",
             "created_at": "HAS_TIMESTAMP",
+            "时间戳": "HAS_TIMESTAMP",
             
             # IS 映射
             "是": "IS",
@@ -193,6 +210,66 @@ class PredicateGovernor:
             "描述为": "IS",
             "defined_as": "IS",
             "is_defined_as": "IS",
+            "表示": "IS",
+            "含义是": "IS",
+            
+            # USES 映射
+            "使用": "USES",
+            "采用": "USES",
+            "运用": "USES",
+            "利用": "USES",
+            "uses": "USES",
+            "utilizes": "USES",
+            "使用方法": "USES",
+            "使用工具": "USES",
+            
+            # IMPLEMENTS 映射
+            "实现": "IMPLEMENTS",
+            "实现了": "IMPLEMENTS",
+            "实现方法": "IMPLEMENTS",
+            "实现方式": "IMPLEMENTS",
+            "implements": "IMPLEMENTS",
+            "implementation_of": "IMPLEMENTS",
+            
+            # COMPARES_WITH 映射
+            "比较": "COMPARES_WITH",
+            "对比": "COMPARES_WITH",
+            "相比": "COMPARES_WITH",
+            "compare": "COMPARES_WITH",
+            "compared_with": "COMPARES_WITH",
+            "与...对比": "COMPARES_WITH",
+            
+            # DEPENDS_ON 映射
+            "依赖": "DEPENDS_ON",
+            "依赖于": "DEPENDS_ON",
+            "取决于": "DEPENDS_ON",
+            "depends_on": "DEPENDS_ON",
+            "依赖关系": "DEPENDS_ON",
+            "依赖于...": "DEPENDS_ON",
+            
+            # CONTAINS 映射
+            "包含": "CONTAINS",
+            "包含了": "CONTAINS",
+            "包含有": "CONTAINS",
+            "contains": "CONTAINS",
+            "包含关系": "CONTAINS",
+            
+            # RELATES_TO 映射（通用关系）
+            "相关": "RELATES_TO",
+            "与...相关": "RELATES_TO",
+            "关联": "RELATES_TO",
+            "相关于": "RELATES_TO",
+            "relates_to": "RELATES_TO",
+            "related_to": "RELATES_TO",
+            "联系": "RELATES_TO",
+            
+            # MENTIONS 映射
+            "提到": "MENTIONS",
+            "提及": "MENTIONS",
+            "引用": "MENTIONS",
+            "mentions": "MENTIONS",
+            "references": "MENTIONS",
+            "引用了": "MENTIONS",
         }
         
         # 精确匹配
@@ -208,7 +285,7 @@ class PredicateGovernor:
     
     def _validate_type_constraint(self, source_type: str, predicate: str, target_type: str) -> bool:
         """
-        验证类型约束（仅5种允许的关系）
+        验证类型约束
         
         Args:
             source_type: 源节点类型
@@ -218,27 +295,56 @@ class PredicateGovernor:
         Returns:
             是否通过约束验证
         """
-        # 定义5种允许的关系及其类型约束
+        # 定义允许的关系及其类型约束
+        # 支持多种节点类型：Concept, KnowledgePoint, Document, Question, etc.
         type_constraints = {
-            "BELONGS_TO": {  # KnowledgePoint -> KnowledgePoint
-                "sources": ["KnowledgePoint"],
-                "targets": ["KnowledgePoint"]
+            "BELONGS_TO": {  # 子知识点属于父知识点
+                "sources": ["KnowledgePoint", "Concept"],
+                "targets": ["KnowledgePoint", "Concept"]
             },
-            "FROM": {  # KnowledgePoint -> Document
-                "sources": ["KnowledgePoint"],
+            "FROM": {  # 知识点从文档中提取
+                "sources": ["KnowledgePoint", "Concept"],
                 "targets": ["Document"]
             },
-            "PRACTICES_IS": {  # Question -> KnowledgePoint
+            "PRACTICES_IS": {  # 题目中提到知识点
                 "sources": ["Question"],
-                "targets": ["KnowledgePoint"]
+                "targets": ["KnowledgePoint", "Concept"]
             },
-            "HAS_TIMESTAMP": {  # Document -> Timestamp
+            "HAS_TIMESTAMP": {  # 文档的更新时间戳
                 "sources": ["Document"],
                 "targets": ["Timestamp"]
             },
-            "IS": {  # KnowledgePoint -> Content
-                "sources": ["KnowledgePoint"],
-                "targets": ["Content"]
+            "IS": {  # 知识点的内容是什么
+                "sources": ["KnowledgePoint", "Concept"],
+                "targets": ["Content", "Concept"]
+            },
+            "USES": {  # 使用某种方法/工具
+                "sources": ["KnowledgePoint", "Concept"],
+                "targets": ["KnowledgePoint", "Concept", "Tool"]
+            },
+            "IMPLEMENTS": {  # 实现某个概念
+                "sources": ["KnowledgePoint", "Concept"],
+                "targets": ["KnowledgePoint", "Concept"]
+            },
+            "COMPARES_WITH": {  # 比较关系
+                "sources": ["KnowledgePoint", "Concept"],
+                "targets": ["KnowledgePoint", "Concept"]
+            },
+            "DEPENDS_ON": {  # 依赖关系
+                "sources": ["KnowledgePoint", "Concept"],
+                "targets": ["KnowledgePoint", "Concept"]
+            },
+            "CONTAINS": {  # 包含关系
+                "sources": ["KnowledgePoint", "Concept", "Document"],
+                "targets": ["KnowledgePoint", "Concept"]
+            },
+            "RELATES_TO": {  # 相关关系（通用）
+                "sources": ["KnowledgePoint", "Concept", "Document", "Question"],
+                "targets": ["KnowledgePoint", "Concept", "Document", "Question"]
+            },
+            "MENTIONS": {  # 提到/引用
+                "sources": ["Document", "Question", "KnowledgePoint", "Concept"],
+                "targets": ["KnowledgePoint", "Concept"]
             }
         }
         

@@ -4,12 +4,14 @@ import os
 import json
 import csv
 import time
+import psutil
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
 import fitz  # PyMuPDF
 from models.document import Chunk
 from bs4 import BeautifulSoup
 from utils.logger import get_logger
+from config.config_manager import get_config
 
 logger = get_logger("services.parser")
 
@@ -265,43 +267,96 @@ class PDFParser(Parser):
         """
         super().__init__(chunk_size=chunk_size)
         self.use_ocr = RAPID_OCR_AVAILABLE and rapid_ocr_client.engine
-        self._docling_available = self._check_docling()
         self._timeout = timeout
         self._parse_metrics = {}
         
-        if self._docling_available and not PDFParser._docling_initialized:
-            self._initialize_docling()
+        if not PDFParser._docling_initialized:
+            self._docling_available = self._initialize_docling()
+        else:
+            self._docling_available = PDFParser._docling_converter is not None
     
     def _check_docling(self) -> bool:
         """检查 Docling 是否可用（包括网络连接）"""
         try:
-            from docling.document_converter import DocumentConverter
-            # 尝试初始化转换器（会下载模型）
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import PdfPipelineOptions
+            from docling.document_converter import DocumentConverter, PdfFormatOption
+            
             if not PDFParser._docling_converter:
-                PDFParser._docling_converter = DocumentConverter()
-                logger.info("[Docling] Library available and initialized")
+                docling_path = get_config("docling_artifacts_path", "./data/docling_models")
+                
+                if not os.path.exists(docling_path):
+                    logger.warning(f"[Docling] Artifacts path does not exist: {docling_path}")
+                    return False
+                
+                if not os.listdir(docling_path):
+                    logger.warning(f"[Docling] Artifacts path is empty: {docling_path}")
+                    return False
+                
+                pipeline_options = PdfPipelineOptions(artifacts_path=docling_path, do_ocr=True)
+                PDFParser._docling_converter = DocumentConverter(
+                    format_options={
+                        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                    }
+                )
+                logger.info(f"[Docling] Library available and initialized with artifacts path: {docling_path}")
             return True
-        except ImportError:
-            logger.warning("[Docling] Library not installed")
+        except ImportError as e:
+            logger.warning(f"[Docling] Library not installed: {e}")
             return False
         except Exception as e:
             logger.warning(f"[Docling] Initialization failed (network or model download issue): {e}")
             return False
     
-    def _initialize_docling(self):
-        """初始化 Docling 转换器（线程安全）"""
+    def _initialize_docling(self) -> bool:
+        """初始化 Docling 转换器（线程安全）
+        
+        Returns:
+            bool: Docling 是否初始化成功
+        """
         if PDFParser._docling_lock:
-            return
+            return PDFParser._docling_converter is not None
         
         PDFParser._docling_lock = True
         try:
             if not PDFParser._docling_converter:
-                from docling.document_converter import DocumentConverter
-                PDFParser._docling_converter = DocumentConverter()
-                logger.info("[Docling] DocumentConverter initialized successfully")
+                from docling.datamodel.base_models import InputFormat
+                from docling.datamodel.pipeline_options import PdfPipelineOptions
+                from docling.document_converter import DocumentConverter, PdfFormatOption
+                
+                docling_path = get_config("docling_artifacts_path", "./data/docling_models")
+                batch_size = get_config("docling_batch_size", 1)
+                enable_ocr = get_config("docling_enable_ocr", True)
+                
+                if not os.path.exists(docling_path):
+                    logger.warning(f"[Docling] Artifacts path does not exist: {docling_path}")
+                    return False
+                
+                if not os.listdir(docling_path):
+                    logger.warning(f"[Docling] Artifacts path is empty: {docling_path}")
+                    return False
+                
+                pipeline_options = PdfPipelineOptions(
+                    artifacts_path=docling_path, 
+                    do_ocr=enable_ocr,
+                    batch_size=batch_size
+                )
+                PDFParser._docling_converter = DocumentConverter(
+                    format_options={
+                        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+                    }
+                )
+                logger.info(f"[Docling] DocumentConverter initialized successfully with artifacts path: {docling_path}")
+                logger.info(f"[Docling] Configuration - batch_size={batch_size}, enable_ocr={enable_ocr}")
                 PDFParser._docling_initialized = True
+                return True
+            return True
+        except ImportError as e:
+            logger.warning(f"[Docling] Library not installed: {e}")
+            return False
         except Exception as e:
             logger.error(f"[Docling] Failed to initialize converter: {e}")
+            return False
         finally:
             PDFParser._docling_lock = False
     
@@ -311,25 +366,41 @@ class PDFParser(Parser):
             self._initialize_docling()
         return PDFParser._docling_converter
     
+    def _check_memory_usage(self) -> bool:
+        """检查当前内存使用是否超过阈值
+        
+        Returns:
+            bool: 如果内存使用在允许范围内返回 True，否则返回 False
+        """
+        memory_limit_mb = get_config("docling_memory_limit_mb", 2048)
+        process = psutil.Process()
+        memory_usage_mb = process.memory_info().rss / (1024 * 1024)
+        
+        if memory_usage_mb > memory_limit_mb:
+            logger.warning(f"[Docling] Memory usage {memory_usage_mb:.1f}MB exceeds limit {memory_limit_mb}MB, skipping docling")
+            return False
+        return True
+    
     def parse(self, file_path: str) -> Tuple[str, List[Chunk]]:
         """Parse PDF file.优先使用 Docling，失败后回退到 PyMuPDF."""
-        if self._docling_available:
-            try:
-                return self._parse_with_docling(file_path)
-            except ImportError as e:
-                logger.error(f"[Docling] Import failed: {e}")
-            except MemoryError as e:
-                logger.error(f"[Docling] Memory error processing {file_path}: {e}")
-            except TimeoutError as e:
-                logger.error(f"[Docling] Timeout processing {file_path}: {e}")
-            except ValueError as e:
-                logger.error(f"[Docling] Invalid document: {e}")
-            except Exception as e:
-                logger.error(f"[Docling] Unexpected error processing {file_path}: {e}")
-                import traceback
-                logger.debug(f"[Docling] Traceback: {traceback.format_exc()}")
+        # TODO: 暂时禁用 docling，使用 PyMuPDF 作为回退方案
+        # if self._docling_available and self._check_memory_usage():
+        #     try:
+        #         return self._parse_with_docling(file_path)
+        #     except ImportError as e:
+        #         logger.error(f"[Docling] Import failed: {e}")
+        #     except MemoryError as e:
+        #         logger.error(f"[Docling] Memory error processing {file_path}: {e}")
+        #     except TimeoutError as e:
+        #         logger.error(f"[Docling] Timeout processing {file_path}: {e}")
+        #     except ValueError as e:
+        #         logger.error(f"[Docling] Invalid document: {e}")
+        #     except Exception as e:
+        #         logger.error(f"[Docling] Unexpected error processing {file_path}: {e}")
+        #         import traceback
+        #         logger.debug(f"[Docling] Traceback: {traceback.format_exc()}")
         
-        logger.info(f"[PDF Parser] Falling back to PyMuPDF for: {file_path}")
+        logger.info(f"[PDF Parser] Using PyMuPDF for: {file_path}")
         return self._parse_with_pymupdf(file_path)
     
     def _parse_with_docling(self, file_path: str) -> Tuple[str, List[Chunk]]:
@@ -360,154 +431,174 @@ class PDFParser(Parser):
         if result is None:
             raise ValueError(f"[Docling] Document conversion returned None: {file_path}")
         
-        elements = getattr(result, 'elements', None)
-        if elements is None:
+        elements = None
+        body_items = []
+        
+        if hasattr(result, 'assembled'):
+            if hasattr(result.assembled, 'elements'):
+                elements = result.assembled.elements
+            if hasattr(result.assembled, 'body') and isinstance(result.assembled.body, list):
+                body_items = result.assembled.body
+        
+        if elements is None and not body_items:
             logger.warning(f"[Docling] No elements found in document: {file_path}")
             return "", []
             
-        if not isinstance(elements, list):
+        if elements is not None and not isinstance(elements, list):
             logger.warning(f"[Docling] Elements is not a list: {type(elements)}")
-            return "", []
+            elements = None
+        
+        supported_element_types = {'TextBlock', 'Table', 'Figure', 'Equation', 'CodeBlock', 'TextElement'}
         
         element_types = {}
         try:
-            from docling.datamodel.elements import Table, Figure, TextBlock
-            element_types = {
-                'TextBlock': TextBlock,
-                'Table': Table,
-                'Figure': Figure,
-            }
-            try:
-                from docling.datamodel.elements import Equation
-                element_types['Equation'] = Equation
-            except ImportError:
-                pass
-            try:
-                from docling.datamodel.elements import CodeBlock
-                element_types['CodeBlock'] = CodeBlock
-            except ImportError:
-                pass
-        except ImportError as e:
-            logger.warning(f"[Docling] Failed to import element types: {e}")
+            from docling_core.types.doc.document import DoclingDocumentElement
+            element_types['DoclingDocumentElement'] = DoclingDocumentElement
+            supported_element_types.add('DoclingDocumentElement')
+        except ImportError:
+            pass
         
         full_text = ""
         chunks = []
         doc_id = Path(file_path).stem
-        element_count = {k: 0 for k in element_types.keys()}
+        element_count = {'TextBlock': 0, 'Table': 0, 'Figure': 0, 'Equation': 0, 'CodeBlock': 0}
         
-        for element in elements:
-            element_type_name = type(element).__name__
-            page_num = getattr(element, 'page_num', 1)
-            
-            if isinstance(element, element_types.get('TextBlock', object)):
-                text = getattr(element, 'content', '').strip()
-                if text and len(text) >= 10:
-                    full_text += text + "\n\n"
-                    chunk = Chunk(
-                        doc_id=doc_id,
-                        chunk_id=f"text_{len(chunks)}",
-                        text=text,
-                        meta={
-                            "type": "text",
-                            "page": page_num,
-                            "source": "docling",
-                            "element_type": element_type_name
-                        }
-                    )
-                    chunks.append(chunk)
-                    element_count['TextBlock'] += 1
-                    logger.debug(f"[Docling] Extracted text block: page={page_num}, length={len(text)}")
-            
-            elif isinstance(element, element_types.get('Table', object)):
-                table_md = self._table_to_markdown(element)
-                if table_md:
-                    full_text += table_md + "\n\n"
-                    chunk = Chunk(
-                        doc_id=doc_id,
-                        chunk_id=f"table_{len(chunks)}",
-                        text=table_md,
-                        meta={
-                            "type": "table",
-                            "page": page_num,
-                            "source": "docling",
-                            "element_type": element_type_name,
-                            "rows": len(getattr(element, 'rows', [])),
-                            "cols": self._count_table_cols(element)
-                        }
-                    )
-                    chunks.append(chunk)
-                    element_count['Table'] += 1
-                    logger.debug(f"[Docling] Extracted table: page={page_num}")
-            
-            elif isinstance(element, element_types.get('Figure', object)):
-                caption = getattr(element, 'caption', '') or ''
-                description = getattr(element, 'description', '') or ''
-                fig_type = getattr(element, 'figure_type', 'unknown')
+        if body_items:
+            for item in body_items:
+                if isinstance(item, dict):
+                    text = item.get('text', '').strip()
+                    page_num = item.get('page_no', item.get('page_num', 1))
+                    if text and len(text) >= 10:
+                        full_text += text + "\n\n"
+                        chunk = Chunk(
+                            doc_id=doc_id,
+                            chunk_id=f"text_{len(chunks)}",
+                            text=text,
+                            meta={
+                                "type": "text",
+                                "page": page_num,
+                                "source": "docling",
+                                "element_type": 'TextElement'
+                            }
+                        )
+                        chunks.append(chunk)
+                        element_count['TextBlock'] += 1
+                        logger.debug(f"[Docling] Extracted text block: page={page_num}, length={len(text)}")
+        
+        if elements:
+            for element in elements:
+                element_type_name = type(element).__name__
+                page_num = getattr(element, 'page_num', 1)
                 
-                fig_text = self._build_figure_text(caption, description, fig_type)
-                if fig_text:
-                    full_text += fig_text + "\n\n"
-                    chunk = Chunk(
-                        doc_id=doc_id,
-                        chunk_id=f"figure_{len(chunks)}",
-                        text=fig_text,
-                        meta={
-                            "type": "figure",
-                            "page": page_num,
-                            "source": "docling",
-                            "element_type": element_type_name,
-                            "figure_type": fig_type,
-                            "caption": caption,
-                            "description": description
-                        }
-                    )
-                    chunks.append(chunk)
-                    element_count['Figure'] += 1
-                    logger.debug(f"[Docling] Extracted figure: page={page_num}, type={fig_type}")
-            
-            elif isinstance(element, element_types.get('Equation', object)):
-                latex = getattr(element, 'latex', '') or str(element)
-                if latex and len(latex) >= 5:
-                    full_text += f"$$ {latex} $$\n\n"
-                    chunk = Chunk(
-                        doc_id=doc_id,
-                        chunk_id=f"equation_{len(chunks)}",
-                        text=f"$$ {latex} $$",
-                        meta={
-                            "type": "equation",
-                            "page": page_num,
-                            "source": "docling",
-                            "element_type": element_type_name,
-                            "latex": latex
-                        }
-                    )
-                    chunks.append(chunk)
-                    element_count['Equation'] += 1
-                    logger.debug(f"[Docling] Extracted equation: page={page_num}")
-            
-            elif isinstance(element, element_types.get('CodeBlock', object)):
-                code_text = getattr(element, 'content', '') or ''
-                language = getattr(element, 'language', 'unknown')
-                if code_text and len(code_text) >= 10:
-                    full_text += f"```\n{code_text}\n```\n\n"
-                    chunk = Chunk(
-                        doc_id=doc_id,
-                        chunk_id=f"code_{len(chunks)}",
-                        text=f"```\n{code_text}\n```",
-                        meta={
-                            "type": "code",
-                            "page": page_num,
-                            "source": "docling",
-                            "element_type": element_type_name,
-                            "language": language
-                        }
-                    )
-                    chunks.append(chunk)
-                    element_count['CodeBlock'] += 1
-                    logger.debug(f"[Docling] Extracted code block: page={page_num}, language={language}")
-            
-            else:
-                logger.debug(f"[Docling] Skipping unknown element type: {element_type_name}")
+                if element_type_name in supported_element_types or element_type_name == 'TextBlock' or element_type_name == 'TextElement':
+                    text = getattr(element, 'content', getattr(element, 'text', '')).strip()
+                    if text and len(text) >= 10:
+                        full_text += text + "\n\n"
+                        chunk = Chunk(
+                            doc_id=doc_id,
+                            chunk_id=f"text_{len(chunks)}",
+                            text=text,
+                            meta={
+                                "type": "text",
+                                "page": page_num,
+                                "source": "docling",
+                                "element_type": element_type_name
+                            }
+                        )
+                        chunks.append(chunk)
+                        element_count['TextBlock'] += 1
+                        logger.debug(f"[Docling] Extracted text block: page={page_num}, length={len(text)}")
+                
+                elif element_type_name in supported_element_types or element_type_name == 'Table':
+                    table_md = self._table_to_markdown(element)
+                    if table_md:
+                        full_text += table_md + "\n\n"
+                        chunk = Chunk(
+                            doc_id=doc_id,
+                            chunk_id=f"table_{len(chunks)}",
+                            text=table_md,
+                            meta={
+                                "type": "table",
+                                "page": page_num,
+                                "source": "docling",
+                                "element_type": element_type_name,
+                                "rows": len(getattr(element, 'rows', [])),
+                                "cols": self._count_table_cols(element)
+                            }
+                        )
+                        chunks.append(chunk)
+                        element_count['Table'] += 1
+                        logger.debug(f"[Docling] Extracted table: page={page_num}")
+                
+                elif element_type_name in supported_element_types or element_type_name == 'Figure':
+                    caption = getattr(element, 'caption', '') or ''
+                    description = getattr(element, 'description', '') or ''
+                    fig_type = getattr(element, 'figure_type', 'unknown')
+                    
+                    fig_text = self._build_figure_text(caption, description, fig_type)
+                    if fig_text:
+                        full_text += fig_text + "\n\n"
+                        chunk = Chunk(
+                            doc_id=doc_id,
+                            chunk_id=f"figure_{len(chunks)}",
+                            text=fig_text,
+                            meta={
+                                "type": "figure",
+                                "page": page_num,
+                                "source": "docling",
+                                "element_type": element_type_name,
+                                "figure_type": fig_type,
+                                "caption": caption,
+                                "description": description
+                            }
+                        )
+                        chunks.append(chunk)
+                        element_count['Figure'] += 1
+                        logger.debug(f"[Docling] Extracted figure: page={page_num}, type={fig_type}")
+                
+                elif element_type_name in supported_element_types or element_type_name == 'Equation':
+                    latex = getattr(element, 'latex', '') or str(element)
+                    if latex and len(latex) >= 5:
+                        full_text += f"$$ {latex} $$\n\n"
+                        chunk = Chunk(
+                            doc_id=doc_id,
+                            chunk_id=f"equation_{len(chunks)}",
+                            text=f"$$ {latex} $$",
+                            meta={
+                                "type": "equation",
+                                "page": page_num,
+                                "source": "docling",
+                                "element_type": element_type_name,
+                                "latex": latex
+                            }
+                        )
+                        chunks.append(chunk)
+                        element_count['Equation'] += 1
+                        logger.debug(f"[Docling] Extracted equation: page={page_num}")
+                
+                elif element_type_name in supported_element_types or element_type_name == 'CodeBlock':
+                    code_text = getattr(element, 'content', '') or ''
+                    language = getattr(element, 'language', 'unknown')
+                    if code_text and len(code_text) >= 10:
+                        full_text += f"```\n{code_text}\n```\n\n"
+                        chunk = Chunk(
+                            doc_id=doc_id,
+                            chunk_id=f"code_{len(chunks)}",
+                            text=f"```\n{code_text}\n```",
+                            meta={
+                                "type": "code",
+                                "page": page_num,
+                                "source": "docling",
+                                "element_type": element_type_name,
+                                "language": language
+                            }
+                        )
+                        chunks.append(chunk)
+                        element_count['CodeBlock'] += 1
+                        logger.debug(f"[Docling] Extracted code block: page={page_num}, language={language}")
+                
+                else:
+                    logger.debug(f"[Docling] Skipping unknown element type: {element_type_name}")
         
         parse_time = time.time() - start_time
         self._parse_metrics = {

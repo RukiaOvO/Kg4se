@@ -50,6 +50,18 @@
             <div class="header-left">
               <h2>所有文档</h2>
               <n-space>
+                <n-button
+                  v-if="selectedDocs.length > 0"
+                  type="error"
+                  size="small"
+                  @click="handleBatchDelete"
+                  style="align-self: center;"
+                >
+                  <template #icon>
+                    <n-icon size="14"><trash-outline /></n-icon>
+                  </template>
+                  批量删除 ({{ selectedDocs.length }})
+                </n-button>
                 <!-- 状态筛选 -->
                 <n-select
                   v-model:value="filterStatus"
@@ -128,6 +140,8 @@
             :loading="loading"
             :scroll-x="1200"
             striped
+            :row-key="(row) => row.id"
+            v-model:checked-row-keys="selectedDocs"
           />
         </n-spin>
       </n-card>
@@ -288,7 +302,8 @@ import {
   DocumentTextOutline,
   CheckmarkCircleOutline,
   HourglassOutline,
-  SearchOutline
+  SearchOutline,
+  TrashOutline
 } from '@vicons/ionicons5'
 import { listDocuments, getDocumentDetail, getDocumentFileUrl, deleteDocument, type DocumentListResponse, type DocumentDetail } from '@/api/services'
 
@@ -529,33 +544,11 @@ const handleSearch = () => {
   loadDocuments()
 }
 
-const rowKey = (row: any) => row.id
-
-const rowProps = (row: any) => {
-  return {
-    onClick: () => {
-      const index = selectedDocs.value.indexOf(row.id)
-      if (index > -1) {
-        selectedDocs.value.splice(index, 1)
-      } else {
-        selectedDocs.value.push(row.id)
-      }
-    }
-  }
-}
-
 // Table columns
 const columns = computed(() => [
   {
     type: 'selection',
     width: 40
-  },
-  {
-    title: '文件名',
-    key: 'filename',
-    width: 250,
-    ellipsis: { tooltip: true },
-    render: (row: any) => row.filename
   },
   {
     title: '文件名',

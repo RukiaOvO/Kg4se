@@ -154,6 +154,18 @@ class Settings(BaseSettings):
     build_version_prefix: str = "v2.0"
     
     # ============================================
+    # Docling 配置
+    # ============================================
+    
+    docling_artifacts_path: str = "./data/docling_models"
+    
+    # Docling 内存优化配置
+    docling_batch_size: int = 1  # 批处理大小，减少内存峰值
+    docling_enable_ocr: bool = True  # 是否启用OCR（OCR非常消耗内存）
+    docling_max_pages: Optional[int] = None  # 最大处理页数，None表示不限制
+    docling_memory_limit_mb: int = 2048  # 内存限制（MB），超过后回退到PyMuPDF
+    
+    # ============================================
     # 兼容性配置（已弃用，保留向后兼容）
     # ============================================
     
@@ -246,6 +258,13 @@ class Settings(BaseSettings):
             # 构建版本配置
             build_version_prefix=os.getenv("BUILD_VERSION_PREFIX", "v2.0"),
             
+            # Docling 配置
+            docling_artifacts_path=os.getenv("DOCLING_ARTIFACTS_PATH", "./data/docling_models"),
+            docling_batch_size=int(os.getenv("DOCLING_BATCH_SIZE", "1")),
+            docling_enable_ocr=cls._get_bool("DOCLING_ENABLE_OCR", True),
+            docling_max_pages=cls._get_int_or_none("DOCLING_MAX_PAGES"),
+            docling_memory_limit_mb=int(os.getenv("DOCLING_MEMORY_LIMIT_MB", "2048")),
+            
             # 兼容性配置（已弃用）
             openai_api_key=os.getenv("OPENAI_API_KEY"),
             openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
@@ -324,6 +343,17 @@ class Settings(BaseSettings):
         if value is None:
             return default
         return value.lower() in ("true", "1", "yes", "on")
+    
+    @staticmethod
+    def _get_int_or_none(key: str) -> Optional[int]:
+        """获取整数类型环境变量，若未设置或无效则返回 None"""
+        value = os.getenv(key)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            return None
     
     def validate(self) -> List[str]:
         """

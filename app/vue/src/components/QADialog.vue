@@ -71,9 +71,11 @@
       <div class="input-area">
         <div class="input-controls">
           <n-space>
-            <n-checkbox v-model:checked="useKG" size="small">
-              使用知识图谱
-            </n-checkbox>
+            <n-radio-group v-model:value="qaMode" size="small">
+              <n-radio value="graphrag">GraphRAG</n-radio>
+              <n-radio value="rag">RAG</n-radio>
+              <n-radio value="llm">LLM</n-radio>
+            </n-radio-group>
             <n-button
               v-if="messages.length > 0"
               type="error"
@@ -126,17 +128,17 @@ import {
   NInput,
   NButton,
   NSpace,
-  NCheckbox,
+  NRadioGroup,
+  NRadio,
   NCollapse,
   NCollapseItem,
   useMessage
 } from 'naive-ui'
 import {
   ChatbubbleOutline,
-  PersonCircleOutline,
-  SparkliesOutline
+  PersonCircleOutline
 } from '@vicons/ionicons5'
-import { askQuestion, Message, checkQAHealth } from '@/api/services'
+import { askQuestion, Message, checkQAHealth, QAMode } from '@/api/services'
 
 interface ConversationMessage extends Message {
   context?: string
@@ -166,9 +168,8 @@ const show = computed({
 const messages = ref<ConversationMessage[]>([])
 const inputQuestion = ref('')
 const loading = ref(false)
-const useKG = ref(true)
+const qaMode = ref<QAMode>('graphrag')
 const providerName = ref('AI')
-const messagesContainer = ref<HTMLElement>()
 
 // Initialize
 watch(
@@ -231,7 +232,7 @@ async function handleAsk() {
     const response = await askQuestion({
       question,
       conversation_history: conversationHistory.slice(0, -1), // Exclude current user message
-      use_kg: useKG.value
+      mode: qaMode.value
     })
 
     if (response.success) {
@@ -452,6 +453,11 @@ function formatAnswer(text: string): string {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.mode-icon {
+  margin-right: 4px;
+  font-size: 14px;
 }
 
 .input-box {

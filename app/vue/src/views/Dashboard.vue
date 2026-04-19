@@ -351,24 +351,12 @@ const pieChartOption = computed(() => {
       trigger: 'item',
       formatter: '{b}: {c} ({d}%)'
     },
-    legend: {
-      orient: 'horizontal',
-      bottom: 10,
-      left: 'center',
-      textStyle: {
-        color: '#666',
-        fontSize: 12
-      },
-      itemWidth: 12,
-      itemHeight: 12,
-      itemGap: 16
-    },
     series: [
       {
         name: '关系类型',
         type: 'pie',
         radius: ['35%', '65%'],
-        center: ['50%', '45%'],
+        center: ['50%', '50%'],
         avoidLabelOverlap: false,
         itemStyle: {
           borderRadius: 10,
@@ -376,22 +364,28 @@ const pieChartOption = computed(() => {
           borderWidth: 2
         },
         label: {
-          show: false,
-          position: 'center'
+          show: true,
+          position: 'outside',
+          fontSize: 12,
+          color: '#666',
+          formatter: '{b}: {d}%'
         },
         emphasis: {
           label: {
             show: true,
-            fontSize: 18,
+            fontSize: 16,
             fontWeight: 'bold',
             color: '#d4af37'
           }
         },
         labelLine: {
-          show: false
+          show: true,
+          length: 15,
+          length2: 10,
+          smooth: true
         },
         data: data,
-        color: ['#d4af37', '#c9a668', '#b8860b', '#daa520', '#8b6914']
+        color: ['#d4af37', '#c9a668', '#b8860b', '#daa520', '#8b6914', '#cd853f', '#daa520', '#b8860b', '#c9a668', '#d4af37']
       }
     ]
   }

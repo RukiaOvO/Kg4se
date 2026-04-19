@@ -183,6 +183,46 @@ class Neo4jClient:
             self.driver.close()
     
     @staticmethod
+    def _sanitize_relationship_type(rel_type: str) -> str:
+        """
+        Sanitize relationship type to be valid Cypher syntax.
+        
+        Cypher relationship types must:
+        - Start with a letter
+        - Contain only letters, digits, and underscores
+        - Not contain special characters like spaces, dots, etc.
+        
+        Args:
+            rel_type: Original relationship type
+            
+        Returns:
+            Sanitized relationship type
+        """
+        if not rel_type:
+            return "UNKNOWN"
+        
+        # Replace invalid characters with underscores
+        # Keep only letters, digits, and underscores
+        sanitized = ''.join(c if c.isalnum() else '_' for c in rel_type)
+        
+        # Ensure it starts with a letter
+        if not sanitized or not sanitized[0].isalpha():
+            sanitized = 'REL_' + sanitized
+        
+        # Replace multiple underscores with single underscore
+        while '__' in sanitized:
+            sanitized = sanitized.replace('__', '_')
+        
+        # Remove trailing underscore if present
+        sanitized = sanitized.rstrip('_')
+        
+        # Limit length to reasonable size
+        if len(sanitized) > 64:
+            sanitized = sanitized[:64]
+        
+        return sanitized.upper()
+    
+    @staticmethod
     def _sanitize_properties(props: Dict[str, Any]) -> Dict[str, Any]:
         """
         Sanitize properties to only include primitive types and arrays.
@@ -413,11 +453,14 @@ class Neo4jClient:
         # Sanitize properties to only include primitives
         sanitized_props = self._sanitize_properties(properties or {})
         
+        # Sanitize relationship type to be valid Cypher syntax
+        sanitized_rel_type = self._sanitize_relationship_type(rel_type)
+        
         query = f"""
         MATCH (a), (b)
         WHERE ((a:Document AND a.id = $source_id) OR (a:Concept AND a.name = $source_id))
           AND ((b:Document AND b.id = $target_id) OR (b:Concept AND b.name = $target_id))
-        MERGE (a)-[r:{rel_type}]->(b)
+        MERGE (a)-[r:{sanitized_rel_type}]->(b)
         SET r += $properties,
             r.created_at = coalesce(r.created_at, datetime()),
             r.updated_at = datetime()

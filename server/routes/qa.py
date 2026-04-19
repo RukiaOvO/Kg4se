@@ -3,6 +3,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from services.qa_service import qa_service
+from services.config_service import config_service
 from utils.logger import get_logger
 
 logger = get_logger("routes.qa")
@@ -18,7 +19,7 @@ class AskRequest(BaseModel):
     """Request model for asking a question."""
     question: str
     conversation_history: Optional[List[Message]] = None
-    use_kg: bool = True  # Use knowledge graph context
+    mode: str = "graphrag"  # graphrag, rag, or llm
     session_id: Optional[str] = None  # Session ID for continuous conversation
 
 
@@ -78,13 +79,27 @@ async def ask_question(request: AskRequest) -> AskResponse:
                 for msg in request.conversation_history
             ]
         
-        # Get answer from QA service
-        result = qa_service.answer_question(
-            question=request.question,
-            conversation_history=history,
-            use_kg=request.use_kg,
-            session_id=request.session_id
-        )
+        # Get answer from QA service based on mode
+        mode = request.mode.lower()
+        if mode == "rag":
+            result = qa_service.answer_with_rag(
+                question=request.question,
+                conversation_history=history,
+                session_id=request.session_id
+            )
+        elif mode == "llm":
+            result = qa_service.answer_with_llm(
+                question=request.question,
+                conversation_history=history,
+                session_id=request.session_id
+            )
+        else:
+            # Default to graphrag
+            result = qa_service.answer_with_graphrag(
+                question=request.question,
+                conversation_history=history,
+                session_id=request.session_id
+            )
         
         if not result["success"]:
             raise HTTPException(
@@ -163,8 +178,9 @@ async def submit_feedback(feedback: FeedbackRequest):
 @router.get("/health")
 async def health_check():
     """Check if Q&A service is available."""
+    ai_config = config_service.get_ai_provider_config()
     return {
         "status": "healthy" if qa_service.ai_client else "unhealthy",
-        "provider": qa_service.settings.ai_provider,
+        "provider": ai_config.get("provider", "unknown"),
         "has_ai_client": qa_service.ai_client is not None
     }

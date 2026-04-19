@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from infra.ai_providers import AIProviderFactory
 from infra.neo4j_client import neo4j_client
+from infra.faiss_store import faiss_store
 from services.config_service import config_service
 from utils.logger import get_logger
 
@@ -16,6 +17,36 @@ class QAService:
     def __init__(self):
         self.ai_client = self._initialize_ai_client()
         self.context_limit = 2000  # 字符限制
+    
+    def _query_vector_store(self, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """Query vector store for similar documents."""
+        try:
+            from infra.ai_providers import AIProviderFactory
+            
+            ai_config = config_service.get_ai_provider_config()
+            embedding_client = AIProviderFactory.create_client(
+                provider=ai_config["provider"],
+                api_key=ai_config["api_key"],
+                model=ai_config["model"],
+                base_url=ai_config["base_url"]
+            )
+            
+            query_embedding = embedding_client.embedding(question)
+            results = faiss_store.search(query_embedding, top_k=top_k)
+            
+            contexts = []
+            for result in results:
+                if result.metadata:
+                    contexts.append({
+                        "text": result.metadata.get("text", ""),
+                        "source": result.metadata.get("source", ""),
+                        "similarity": result.similarity
+                    })
+            
+            return contexts
+        except Exception as e:
+            logger.error(f"[QA服务] 向量数据库查询失败: {e}")
+            return []
         
     def _initialize_ai_client(self):
         """Initialize AI client with configured provider."""
@@ -217,6 +248,10 @@ class QAService:
             
             messages.append({"role": "user", "content": user_content})
             
+            logger.info(f"[QA服务] 用户提问: {question[:100]}...")
+            logger.debug(f"[QA服务] 历史对话数: {len(conversation_history) if conversation_history else 0}")
+            logger.debug(f"[QA服务] 完整Prompt:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
+            
             answer = self.ai_client.chat_completion(
                 messages=messages,
                 temperature=0.3,
@@ -233,6 +268,184 @@ class QAService:
         
         except Exception as e:
             logger.error(f"[QA服务] 回答问题失败: {e}")
+            import traceback
+            logger.debug(f"[错误详情] {traceback.format_exc()}")
+            return {
+                "success": False,
+                "answer": "处理问题时发生错误",
+                "used_context": False,
+                "error": str(e)
+            }
+    
+    def answer_with_graphrag(
+        self,
+        question: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Answer using GraphRAG (knowledge graph + AI).
+        
+        Args:
+            question: User's question
+            conversation_history: Previous conversation messages
+            session_id: Session ID for continuous conversation
+        
+        Returns:
+            Dictionary with answer and metadata
+        """
+        return self.answer_question(question, conversation_history, use_kg=True, session_id=session_id)
+    
+    def answer_with_rag(
+        self,
+        question: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Answer using RAG (vector database retrieval + AI).
+        
+        Args:
+            question: User's question
+            conversation_history: Previous conversation messages
+            session_id: Session ID for continuous conversation
+        
+        Returns:
+            Dictionary with answer and metadata
+        """
+        if not self.ai_client:
+            return {
+                "success": False,
+                "answer": "AI服务未配置",
+                "used_context": False,
+                "error": "AI客户端未初始化"
+            }
+        
+        try:
+            vector_context = ""
+            used_vector = False
+            
+            vector_results = self._query_vector_store(question)
+            if vector_results:
+                vector_context = "\n\n".join([
+                    f"【文档片段】\n相似度: {r['similarity']:.4f}\n内容: {r['text'][:500]}"
+                    for r in vector_results[:3]
+                ])
+                used_vector = True
+            
+            messages = []
+            
+            system_msg = """你是一个智能问答助手，专门基于提供的文档内容回答用户提出的问题。
+
+请按照以下指导原则：
+1. 首先参考提供的文档信息来答题
+2. 如果文档中有相关信息，优先使用这些信息
+3. 提供清晰、准确和有组织的答案
+4. 如果信息不足，请说明并给出可能的解释
+5. 答案应该简明扼要但足够详细
+6. 使用markdown格式使答案更易阅读"""
+            
+            messages.append({"role": "system", "content": system_msg})
+            
+            if conversation_history:
+                messages.extend(conversation_history[-6:])
+            
+            user_content = question
+            if vector_context:
+                user_content = f"""【参考文档】
+{vector_context}
+
+【用户问题】
+{question}"""
+            
+            messages.append({"role": "user", "content": user_content})
+            
+            logger.info(f"[QA服务] 用户提问: {question[:100]}...")
+            logger.debug(f"[QA服务] 历史对话数: {len(conversation_history) if conversation_history else 0}")
+            logger.debug(f"[QA服务] 完整Prompt:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
+            
+            answer = self.ai_client.chat_completion(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1024
+            )
+            
+            return {
+                "success": True,
+                "answer": answer,
+                "used_context": used_vector,
+                "context_snippet": vector_context[:300] if vector_context else None,
+                "error": None
+            }
+        
+        except Exception as e:
+            logger.error(f"[QA服务] RAG回答失败: {e}")
+            import traceback
+            logger.debug(f"[错误详情] {traceback.format_exc()}")
+            return {
+                "success": False,
+                "answer": "处理问题时发生错误",
+                "used_context": False,
+                "error": str(e)
+            }
+    
+    def answer_with_llm(
+        self,
+        question: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Answer using LLM directly (no context).
+        
+        Args:
+            question: User's question
+            conversation_history: Previous conversation messages
+            session_id: Session ID for continuous conversation
+        
+        Returns:
+            Dictionary with answer and metadata
+        """
+        if not self.ai_client:
+            return {
+                "success": False,
+                "answer": "AI服务未配置",
+                "used_context": False,
+                "error": "AI客户端未初始化"
+            }
+        
+        try:
+            messages = []
+            
+            system_msg = """你是一个智能问答助手。请直接回答用户的问题，提供清晰、准确和有组织的答案。"""
+            
+            messages.append({"role": "system", "content": system_msg})
+            
+            if conversation_history:
+                messages.extend(conversation_history[-6:])
+            
+            messages.append({"role": "user", "content": question})
+            
+            logger.info(f"[QA服务] 用户提问: {question[:100]}...")
+            logger.debug(f"[QA服务] 历史对话数: {len(conversation_history) if conversation_history else 0}")
+            logger.debug(f"[QA服务] 完整Prompt:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
+            
+            answer = self.ai_client.chat_completion(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=1024
+            )
+            
+            return {
+                "success": True,
+                "answer": answer,
+                "used_context": False,
+                "context_snippet": None,
+                "error": None
+            }
+        
+        except Exception as e:
+            logger.error(f"[QA服务] LLM回答失败: {e}")
             import traceback
             logger.debug(f"[错误详情] {traceback.format_exc()}")
             return {
