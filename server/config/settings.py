@@ -58,6 +58,16 @@ class Settings(BaseSettings):
     ai_base_url: Optional[str] = None
     ai_temperature: float = 0.3
     ai_max_tokens: int = 4096
+
+    judge_api_key: Optional[str] = None
+    judge_model: Optional[str] = None
+    judge_base_url: Optional[str] = None
+    judge_temperature: float = 0.0  # 评估任务使用低温度提高一致性
+    
+    # 评估参数配置
+    evaluation_num_samples: int = 3  # Pointwise 评估采样次数
+    evaluation_enable_pairwise: bool = True  # 是否启用成对比较
+    evaluation_position_swap: bool = True  # 是否启用位置交换缓解偏差
     
     # ============================================
     # 嵌入模型配置
@@ -67,7 +77,7 @@ class Settings(BaseSettings):
     embedding_dimension: int = 1536
     embedding_api_key: Optional[str] = None
     embedding_base_url: Optional[str] = None
-    
+
     # ============================================
     # FAISS 配置
     # ============================================
@@ -208,6 +218,15 @@ class Settings(BaseSettings):
             ai_base_url=cls._get_ai_base_url(),
             ai_temperature=float(os.getenv("AI_TEMPERATURE", "0.3")),
             ai_max_tokens=int(os.getenv("AI_MAX_TOKENS", "4096")),
+            judge_api_key=os.getenv("JUDGE_API_KEY", cls._get_ai_api_key()),
+            judge_model=os.getenv("JUDGE_MODEL", cls._get_ai_model()),
+            judge_base_url=os.getenv("JUDGE_BASE_URL", cls._get_ai_base_url()),
+            judge_temperature=float(os.getenv("JUDGE_TEMPERATURE", "0.0")),
+    
+            # 评估参数配置
+            evaluation_num_samples=int(os.getenv("EVALUATION_NUM_SAMPLES", "3")),
+            evaluation_enable_pairwise=cls._get_bool(os.getenv("EVALUATION_ENABLE_PAIRWISE", "True")),
+            evaluation_position_swap=cls._get_bool(os.getenv("EVALUATION_ENABLE_POSITION_SWAP", "True")),
             
             # 嵌入模型配置（兼容旧配置）
             embedding_model=os.getenv("EMBEDDING_MODEL", "text-embedding-v3"),

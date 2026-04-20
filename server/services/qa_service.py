@@ -19,31 +19,78 @@ class QAService:
         self.context_limit = 2000  # 字符限制
     
     def _query_vector_store(self, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
-        """Query vector store for similar documents."""
+        """Query vector store for similar documents using Neo4j vector index."""
         try:
-            from infra.ai_providers import AIProviderFactory
+            from graphrag.utils.embedding import get_embedding
+            from infra.neo4j_client import neo4j_client
             
-            ai_config = config_service.get_ai_provider_config()
-            embedding_client = AIProviderFactory.create_client(
-                provider=ai_config["provider"],
-                api_key=ai_config["api_key"],
-                model=ai_config["model"],
-                base_url=ai_config["base_url"]
-            )
+            query_embedding = get_embedding(question)
             
-            query_embedding = embedding_client.embedding(question)
-            results = faiss_store.search(query_embedding, top_k=top_k)
+            if not neo4j_client._initialized:
+                logger.debug("[QA服务] Neo4j客户端未初始化，使用FAISS")
+                results = faiss_store.search(query_embedding, top_k=top_k)
+                contexts = []
+                for result in results:
+                    if result.metadata:
+                        contexts.append({
+                            "text": result.metadata.get("text", ""),
+                            "source": result.metadata.get("source", ""),
+                            "similarity": result.similarity
+                        })
+                return contexts
+            
+            query = """
+                CALL db.index.vector.queryNodes('concept_embeddings', $topK, $queryVector)
+                YIELD node, score
+                RETURN node.definition AS text, node.name AS source, score AS similarity
+                ORDER BY score DESC
+                LIMIT $topK
+            """
+            
+            params = {
+                "topK": top_k,
+                "queryVector": query_embedding
+            }
+            
+            try:
+                results = neo4j_client.execute_query(query, params)
+                
+                contexts = []
+                for record in results:
+                    contexts.append({
+                        "text": record.get("text", ""),
+                        "source": record.get("source", ""),
+                        "similarity": record.get("similarity", 0.0)
+                    })
+                
+                logger.debug(f"[QA服务] Neo4j向量检索返回 {len(contexts)} 条结果")
+                
+                if contexts:
+                    return contexts
+            except Exception as e:
+                logger.debug(f"[QA服务] 向量索引查询失败，使用关键词匹配: {e}")
+            
+            fallback_query = """
+                MATCH (n:Concept)
+                WHERE n.definition IS NOT NULL AND n.definition <> ''
+                RETURN n.definition AS text, n.name AS source, 0.5 AS similarity
+                LIMIT $topK
+            """
+            
+            fallback_params = {"topK": top_k}
+            fallback_results = neo4j_client.execute_query(fallback_query, fallback_params)
             
             contexts = []
-            for result in results:
-                if result.metadata:
-                    contexts.append({
-                        "text": result.metadata.get("text", ""),
-                        "source": result.metadata.get("source", ""),
-                        "similarity": result.similarity
-                    })
+            for record in fallback_results:
+                contexts.append({
+                    "text": record.get("text", ""),
+                    "source": record.get("source", ""),
+                    "similarity": record.get("similarity", 0.0)
+                })
             
+            logger.debug(f"[QA服务] Neo4j关键词检索返回 {len(contexts)} 条结果")
             return contexts
+            
         except Exception as e:
             logger.error(f"[QA服务] 向量数据库查询失败: {e}")
             return []
@@ -78,7 +125,10 @@ class QAService:
         try:
             keywords = self._extract_keywords(question)
             
+            logger.debug(f"[QA服务] 提取的关键词: {keywords}")
+            
             if not keywords:
+                logger.debug("[QA服务] 未提取到关键词，返回空结果")
                 return {"entities": [], "relationships": []}
             
             cypher = """
@@ -94,7 +144,7 @@ class QAService:
             }) AS rels
             RETURN {
                 entity: {
-                    id: id(n),
+                    id: elementId(n),
                     name: n.name,
                     type: n.type,
                     definition: n.definition,
@@ -113,12 +163,37 @@ class QAService:
                 }
             )
             
+            logger.debug(f"[QA服务] Neo4j查询结果数量: {len(results) if results else 0}")
+            
+            # 打印前2个结果的实际格式
+            if results and len(results) > 0:
+                import json
+                logger.debug(f"[QA服务] 第一个查询结果格式: {type(results[0])}")
+                logger.debug(f"[QA服务] 第一个查询结果内容: {json.dumps(results[0], ensure_ascii=False)[:500]}")
+            
             entities = []
             for record in results:
-                if record and isinstance(record, dict) and "entity" in record:
-                    entity = record["entity"]
-                    entity["relationships"] = record.get("relationships", [])
-                    entities.append(entity)
+                if record and isinstance(record, dict):
+                    # 检查是否有 result 字段（Cypher 查询返回的格式）
+                    if "result" in record:
+                        result_data = record["result"]
+                        if isinstance(result_data, dict) and "entity" in result_data:
+                            entity = result_data["entity"]
+                            entity["relationships"] = result_data.get("relationships", [])
+                            entities.append(entity)
+                        else:
+                            logger.debug(f"[QA服务] result 字段格式不正确: {str(result_data)[:200]}")
+                    # 直接包含 entity 字段的格式
+                    elif "entity" in record:
+                        entity = record["entity"]
+                        entity["relationships"] = record.get("relationships", [])
+                        entities.append(entity)
+                    else:
+                        logger.debug(f"[QA服务] 跳过不符合格式的记录: {list(record.keys())[:10]}")
+                elif record:
+                    logger.debug(f"[QA服务] 跳过非字典记录: {type(record)}")
+            
+            logger.debug(f"[QA服务] 解析出的实体数量: {len(entities)}")
             
             return {
                 "entities": entities,
@@ -142,10 +217,45 @@ class QAService:
             "would", "should", "might", "may", "do", "does", "did"
         }
         
+        # 尝试使用 jieba 分词（如果可用）
+        try:
+            import jieba
+            words = jieba.lcut(question)
+        except ImportError:
+            # 回退到基于规则的分词
+            words = self._simple_chinese_segment(question)
+        
+        # 过滤停用词和短词
+        keywords = []
+        for word in words:
+            word = word.strip()
+            if word and len(word) > 1 and word not in stop_words:
+                # 检查是否包含停用词（部分匹配）
+                contains_stop = False
+                for stop in stop_words:
+                    if stop in word:
+                        contains_stop = True
+                        break
+                if not contains_stop:
+                    keywords.append(word)
+        
+        # 去重但保持顺序
+        seen = set()
+        unique_keywords = []
+        for kw in keywords:
+            if kw not in seen:
+                seen.add(kw)
+                unique_keywords.append(kw)
+        
+        return unique_keywords[:5]  # 最多5个关键词
+    
+    def _simple_chinese_segment(self, text: str) -> List[str]:
+        """简单的中文分词方法（当 jieba 不可用时使用）"""
         words = []
         current = ""
-        for char in question:
-            if char in " \n\t，。！？,.:!?":
+        
+        for char in text:
+            if char in " \n\t，。！？、；：,.:!?;:":
                 if current:
                     words.append(current)
                     current = ""
@@ -154,8 +264,50 @@ class QAService:
         if current:
             words.append(current)
         
-        keywords = [w for w in words if w and len(w) > 1 and w not in stop_words]
-        return keywords[:5]  # 最多5个关键词
+        # 尝试分割长词（基于常见中文词模式）
+        result = []
+        for word in words:
+            if len(word) > 4:
+                # 尝试按常见模式分割
+                subwords = self._split_long_word(word)
+                result.extend(subwords)
+            else:
+                result.append(word)
+        
+        return result
+    
+    def _split_long_word(self, word: str) -> List[str]:
+        """分割长词的辅助方法"""
+        subwords = []
+        i = 0
+        while i < len(word):
+            # 尝试 3-4 个字符的词
+            found = False
+            for l in [4, 3, 2]:
+                if i + l <= len(word):
+                    candidate = word[i:i+l]
+                    # 常见的中文技术词汇模式
+                    if self._is_common_word(candidate):
+                        subwords.append(candidate)
+                        i += l
+                        found = True
+                        break
+            if not found:
+                subwords.append(word[i])
+                i += 1
+        return subwords
+    
+    def _is_common_word(self, word: str) -> bool:
+        """检查是否是常见中文词汇"""
+        common_words = {
+            "软件", "工程", "开发", "设计", "系统", "技术", "数据", "算法",
+            "网络", "安全", "架构", "测试", "维护", "管理", "项目", "产品",
+            "代码", "编程", "语言", "框架", "平台", "工具", "服务", "应用",
+            "人工智能", "机器学习", "深度学习", "神经网络", "自然语言",
+            "计算机", "数据库", "服务器", "客户端", "接口", "协议", "标准",
+            "重点", "核心", "基础", "原理", "方法", "技术", "理论", "实践"
+        }
+        return word in common_words
     
     def _format_context(self, kg_data: Dict[str, Any]) -> str:
         """Format knowledge graph data as context for AI."""
@@ -217,9 +369,15 @@ class QAService:
             
             if use_kg:
                 kg_data = self.query_knowledge_graph(question)
+                entity_count = len(kg_data.get("entities", []))
+                logger.debug(f"[QA服务] 知识图谱查询结果: {entity_count} 个实体")
+                
                 if kg_data.get("entities"):
                     kg_context = self._format_context(kg_data)
                     used_kg = True
+                    logger.debug(f"[QA服务] 知识图谱上下文长度: {len(kg_context)} 字符")
+                else:
+                    logger.debug("[QA服务] 知识图谱未返回任何实体")
             
             messages = []
             

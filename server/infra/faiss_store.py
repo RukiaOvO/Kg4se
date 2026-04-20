@@ -192,6 +192,11 @@ class FaissStore:
         
         except Exception as e:
             logger.error(f"Failed to search vectors: {e}")
+            logger.error(f"  Query embedding length: {len(query_embedding) if query_embedding else 0}")
+            logger.error(f"  Index dimension: {self.dimension}")
+            logger.error(f"  Index vector count: {self.index.ntotal if hasattr(self.index, 'ntotal') else 'unknown'}")
+            import traceback
+            logger.debug(f"  Traceback: {traceback.format_exc()}")
             return []
     
     def _fallback_search(

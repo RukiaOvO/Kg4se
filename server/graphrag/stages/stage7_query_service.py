@@ -372,7 +372,7 @@ class QueryService:
         
         # 获取问题向量
         question_embedding = get_embedding(question)
-        if not question_embedding or len(question_embedding) != 1536:
+        if not question_embedding or len(question_embedding) != settings.embedding_dimension:
             logger.warning("无法获取问题向量，跳过 FAISS 检索")
             return claims
         
@@ -434,7 +434,7 @@ class QueryService:
             
             # 同时从 FAISS 获取概念
             question_embedding = get_embedding(question)
-            if question_embedding and len(question_embedding) == 1536:
+            if question_embedding and len(question_embedding) == settings.embedding_dimension:
                 results = faiss_store.search(
                     question_embedding,
                     top_k=limit,
@@ -458,7 +458,7 @@ class QueryService:
         # 后备方案：使用 Neo4j 向量索引
         # 获取问题向量
         question_embedding = get_embedding(question)
-        if not question_embedding or len(question_embedding) != 1536:
+        if not question_embedding or len(question_embedding) != settings.embedding_dimension:
             logger.warning("无法获取问题向量，跳过向量检索")
             return claims, concepts
         
