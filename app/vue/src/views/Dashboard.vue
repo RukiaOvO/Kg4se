@@ -318,7 +318,7 @@ const stats = ref({
 const systemStatus = ref({
   neo4j: false,
   redis: false,
-  vector: 'FAISS',
+  vector: 'Neo4j Vector',
   llm: false
 })
 
@@ -464,7 +464,7 @@ const loadSystemStatus = async () => {
     systemStatus.value = {
       neo4j: !!(settings.neo4j_uri && settings.neo4j_user),
       redis: !!(settings.redis_url && settings.redis_url.trim()),
-      vector: 'FAISS', // 默认值
+      vector: 'Neo4j Vector',
       llm: !!(settings.openai_api_key || settings.ai_api_key)
     }
   } catch (error) {

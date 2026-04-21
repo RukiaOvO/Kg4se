@@ -79,16 +79,6 @@ class Settings(BaseSettings):
     embedding_base_url: Optional[str] = None
 
     # ============================================
-    # FAISS 配置
-    # ============================================
-    
-    faiss_enabled: bool = True
-    faiss_index_type: Literal["hnsw", "ivf", "flat", "pq"] = "hnsw"
-    faiss_index_path: str = "./data/faiss/index"
-    faiss_search_top_k: int = 10
-    faiss_search_threshold: float = 0.7
-    
-    # ============================================
     # GraphRAG 配置
     # ============================================
     
@@ -98,6 +88,8 @@ class Settings(BaseSettings):
     graphrag_vector_weight: float = 0.3
     graphrag_keyword_weight: float = 0.2
     graphrag_graph_weight: float = 0.1
+    graphrag_default_top_k: int = 3
+    vector_search_threshold: float = 0.75
     
     # ============================================
     # API 配置
@@ -233,13 +225,6 @@ class Settings(BaseSettings):
             embedding_dimension=int(os.getenv("EMBEDDING_DIMENSION", "1536")),
             embedding_api_key=cls._get_embedding_api_key(),
             embedding_base_url=cls._get_embedding_base_url(),
-            
-            # FAISS 配置
-            faiss_enabled=cls._get_bool("FAISS_ENABLED", True),
-            faiss_index_type=os.getenv("FAISS_INDEX_TYPE", "hnsw"),
-            faiss_index_path=os.getenv("FAISS_INDEX_PATH", "./data/faiss/index"),
-            faiss_search_top_k=int(os.getenv("FAISS_SEARCH_TOP_K", "10")),
-            faiss_search_threshold=float(os.getenv("FAISS_SEARCH_THRESHOLD", "0.7")),
             
             # GraphRAG 配置
             graphrag_enabled=cls._get_bool("GRAPHRAG_ENABLED", True),
@@ -399,11 +384,6 @@ class Settings(BaseSettings):
         ]
         if self.embedding_model not in valid_embedding_models:
             errors.append(f"Unknown embedding model: {self.embedding_model}")
-        
-        # 验证 FAISS 索引类型
-        valid_index_types = ["hnsw", "ivf", "flat", "pq"]
-        if self.faiss_index_type not in valid_index_types:
-            errors.append(f"Unknown FAISS index type: {self.faiss_index_type}")
         
         # 验证 AI 提供商
         valid_providers = [

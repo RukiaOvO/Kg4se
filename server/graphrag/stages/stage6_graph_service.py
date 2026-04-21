@@ -3,13 +3,12 @@
 
 将构建结果写入 Neo4j，确保幂等性与证据回溯
 优化版本：仅存储5种允许的实体和5种允许的关系
-同时支持 FAISS 向量同步
+使用 Neo4j 向量索引进行向量检索
 """
 
 import logging
 from typing import Dict, Any, List
 from infra.neo4j_client import Neo4jClient
-from infra.faiss_store import faiss_store
 from infra.config import settings
 from graphrag.utils.domain_filter import get_domain_filter
 
@@ -49,15 +48,13 @@ class GraphService:
         self.neo4j_client = Neo4jClient()
         self.neo4j_client.initialize()
         self.domain_filter = get_domain_filter()
-        self.faiss_enabled = settings.enable_faiss
         
         # 统计信息
         self.stats = {
             "entities_written": 0,
             "entities_filtered": 0,
             "relationships_written": 0,
-            "relationships_filtered": 0,
-            "vectors_synced": 0
+            "relationships_filtered": 0
         }
     
     def store_entity(self, entity_type: str, entity: Dict[str, Any]) -> bool:
@@ -330,24 +327,6 @@ class GraphService:
         }
         
         self.neo4j_client.execute_query(query, params)
-        
-        # 同步到 FAISS
-        if self.faiss_enabled:
-            embedding = chunk.get("embedding")
-            if embedding:
-                chunk_id = chunk.get("id", "")
-                if chunk_id:
-                    metadata = {
-                        "type": "chunk",
-                        "doc_id": chunk.get("doc_id"),
-                        "text": chunk.get("text"),
-                        "section_path": chunk.get("section_path"),
-                        "page_num": chunk.get("page_num")
-                    }
-                    success = faiss_store.insert([embedding], [chunk_id], [metadata])
-                    if success:
-                        self.stats["vectors_synced"] += 1
-                        logger.debug(f"Chunk vector synced to FAISS: {chunk_id}")
     
     def store_concept(self, concept: Dict[str, Any]):
         """
@@ -385,23 +364,6 @@ class GraphService:
         }
         
         self.neo4j_client.execute_query(query, params)
-        
-        # 同步到 FAISS
-        if self.faiss_enabled:
-            embedding = concept.get("embedding")
-            if embedding:
-                concept_id = concept.get("id", concept.get("name", ""))
-                if concept_id:
-                    metadata = {
-                        "type": "concept",
-                        "name": concept.get("name"),
-                        "domain": concept.get("domain"),
-                        "description": concept.get("description")
-                    }
-                    success = faiss_store.insert([embedding], [concept_id], [metadata])
-                    if success:
-                        self.stats["vectors_synced"] += 1
-                        logger.debug(f"Concept vector synced to FAISS: {concept_id}")
     
     def store_claim(self, claim: Dict[str, Any]):
         """
@@ -447,25 +409,6 @@ class GraphService:
         }
         
         self.neo4j_client.execute_query(query, params)
-        
-        # 同步到 FAISS
-        if self.faiss_enabled:
-            embedding = claim.get("embedding")
-            if embedding:
-                claim_id = claim.get("id", "")
-                if claim_id:
-                    metadata = {
-                        "type": "claim",
-                        "text": claim.get("text"),
-                        "doc_id": claim.get("doc_id"),
-                        "chunk_id": claim.get("chunk_id"),
-                        "claim_type": claim.get("claim_type"),
-                        "confidence": claim.get("confidence")
-                    }
-                    success = faiss_store.insert([embedding], [claim_id], [metadata])
-                    if success:
-                        self.stats["vectors_synced"] += 1
-                        logger.debug(f"Claim vector synced to FAISS: {claim_id}")
     
     def store_relation(self, relation: Dict[str, Any]):
         """

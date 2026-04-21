@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from infra.ai_providers import AIProviderFactory
 from infra.neo4j_client import neo4j_client
-from infra.faiss_store import faiss_store
 from services.config_service import config_service
 from utils.logger import get_logger
 
@@ -22,22 +21,8 @@ class QAService:
         """Query vector store for similar documents using Neo4j vector index."""
         try:
             from graphrag.utils.embedding import get_embedding
-            from infra.neo4j_client import neo4j_client
             
             query_embedding = get_embedding(question)
-            
-            if not neo4j_client._initialized:
-                logger.debug("[QA服务] Neo4j客户端未初始化，使用FAISS")
-                results = faiss_store.search(query_embedding, top_k=top_k)
-                contexts = []
-                for result in results:
-                    if result.metadata:
-                        contexts.append({
-                            "text": result.metadata.get("text", ""),
-                            "source": result.metadata.get("source", ""),
-                            "similarity": result.similarity
-                        })
-                return contexts
             
             query = """
                 CALL db.index.vector.queryNodes('concept_embeddings', $topK, $queryVector)
@@ -142,16 +127,28 @@ class QAService:
                 target_name: related.name,
                 target_type: coalesce(related.type, 'Unknown')
             }) AS rels
+            OPTIONAL MATCH (n)<-[mc:MENTIONS]-(c:Claim)
+            WITH n, rels, collect({
+                claim_text: c.text,
+                claim_type: c.claim_type,
+                confidence: c.confidence,
+                modality: c.modality,
+                polarity: c.polarity
+            }) AS all_claims
             RETURN {
                 entity: {
                     id: elementId(n),
                     name: n.name,
                     type: n.type,
                     definition: n.definition,
+                    description: n.description,
                     domain: n.domain,
+                    category: n.category,
+                    importance: n.importance,
                     aliases: n.aliases
                 },
-                relationships: rels
+                relationships: rels,
+                claims: [c IN all_claims ORDER BY c.confidence DESC LIMIT 3]
             } AS result
             """
             
@@ -316,22 +313,46 @@ class QAService:
         for entity in kg_data.get("entities", []):
             entity_str = f"【{entity.get('name', 'Unknown')}】"
             
-            if entity.get("definition"):
-                entity_str += f"\n定义: {entity['definition']}"
-            
             if entity.get("type"):
                 entity_str += f"\n类型: {entity['type']}"
             
             if entity.get("domain"):
                 entity_str += f"\n领域: {entity['domain']}"
             
+            if entity.get("category"):
+                entity_str += f"\n分类: {entity['category']}"
+            
+            if entity.get("importance"):
+                entity_str += f"\n重要性: {entity['importance']}"
+            
+            if entity.get("definition"):
+                entity_str += f"\n定义: {entity['definition']}"
+            
+            if entity.get("description"):
+                entity_str += f"\n描述: {entity['description']}"
+            
+            if entity.get("aliases") and isinstance(entity["aliases"], list) and entity["aliases"]:
+                entity_str += f"\n别名: {', '.join(entity['aliases'])}"
+            
             if entity.get("relationships"):
                 rel_strs = []
-                for rel in entity.get("relationships", [])[:3]:  # 最多3个关系
+                for rel in entity.get("relationships", [])[:5]:  # 最多5个关系
                     rel_str = f"{rel.get('type', 'RELATED')} {rel.get('target_name', 'Unknown')}"
                     rel_strs.append(rel_str)
                 if rel_strs:
                     entity_str += f"\n关系: {', '.join(rel_strs)}"
+            
+            if entity.get("claims") and isinstance(entity["claims"], list) and entity["claims"]:
+                claim_strs = []
+                for claim in entity["claims"][:3]:  # 最多3个论断
+                    claim_text = claim.get("claim_text", "")[:150]
+                    claim_type = claim.get("claim_type", "fact")
+                    confidence = claim.get("confidence", 0.0)
+                    if claim_text:
+                        claim_str = f"{claim_type}({confidence:.2f}): {claim_text}"
+                        claim_strs.append(claim_str)
+                if claim_strs:
+                    entity_str += f"\n论断:\n  - " + "\n  - ".join(claim_strs)
             
             context_parts.append(entity_str)
         
@@ -385,9 +406,9 @@ class QAService:
 
 请按照以下指导原则：
 1. 首先参考提供的知识图谱信息来答题
-2. 如果知识图谱中有相关信息，优先使用这些信息
-3. 提供清晰、准确和有组织的答案
-4. 如果信息不足，请说明并给出可能的解释
+2. 如果知识图谱中有相关信息，优先使用这些信息。
+3. 缺少的信息可以通过内置知识库补充，或者通过网络检索得到
+4. 提供清晰、准确和有组织的答案
 5. 答案应该简明扼要但足够详细
 6. 使用markdown格式使答案更易阅读"""
             
@@ -575,7 +596,10 @@ class QAService:
         try:
             messages = []
             
-            system_msg = """你是一个智能问答助手。请直接回答用户的问题，提供清晰、准确和有组织的答案。"""
+            system_msg = """你是一个智能问答助手。请直接回答用户的问题。
+            # 不要进行任何知识谱检索
+            # 不要使用网络检索
+            # 不能依赖任何外部信息"""
             
             messages.append({"role": "system", "content": system_msg})
             

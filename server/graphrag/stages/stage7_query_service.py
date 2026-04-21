@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from collections import defaultdict
 
 from infra.neo4j_client import neo4j_client
-from infra.faiss_store import faiss_store
 from config import settings
 from graphrag.utils.embedding import get_embedding, cosine_similarity
 from graphrag.models.claim import Claim
@@ -55,7 +54,7 @@ class QueryService:
     实现多路候选生成 + 图先验协同 + 限域生成
     支持三种问答模式：
     - llm_only: 直接调用 LLM 回答
-    - rag: 仅使用向量检索（FAISS）
+    - rag: 仅使用向量检索（Neo4j）
     - graphrag: 图遍历 + 向量检索 + LLM 生成
     """
     
@@ -67,13 +66,9 @@ class QueryService:
         self.vector_weight = settings.graphrag_vector_weight
         self.keyword_weight = settings.graphrag_keyword_weight
         self.graph_weight = settings.graphrag_graph_weight
-        self.similarity_threshold = settings.faiss_search_threshold if settings.faiss_enabled else 0.75
+        self.similarity_threshold = settings.vector_search_threshold
         
-        # FAISS 配置
-        self.faiss_enabled = settings.faiss_enabled
-        self.faiss_top_k = settings.faiss_search_top_k
-        
-        logger.info(f"FAISS enabled: {self.faiss_enabled}")
+        logger.info("Using Neo4j vector index for similarity search")
         
     def answer(
         self,
@@ -111,7 +106,7 @@ class QueryService:
         
         # RAG 模式：仅使用向量检索
         if mode == "rag":
-            claim_candidates = self._retrieve_by_faiss(question, top_k * 3)
+            claim_candidates, _ = self._retrieve_by_vector(question, top_k * 3)
             final_candidates = claim_candidates[:top_k]
             answer = self._generate_answer(question, final_candidates)
             relevant_themes = []
@@ -362,100 +357,13 @@ class QueryService:
         
         return claims[:limit], concepts[:limit]
     
-    def _retrieve_by_faiss(self, question: str, limit: int) -> List[CandidateEvidence]:
-        """使用 FAISS 进行向量检索"""
-        claims = []
-        
-        if not self.faiss_enabled:
-            logger.warning("FAISS is not enabled, skipping FAISS retrieval")
-            return claims
-        
-        # 获取问题向量
-        question_embedding = get_embedding(question)
-        if not question_embedding or len(question_embedding) != settings.embedding_dimension:
-            logger.warning("无法获取问题向量，跳过 FAISS 检索")
-            return claims
-        
-        # 使用 FAISS 检索
-        results = faiss_store.search(
-            question_embedding,
-            top_k=limit,
-            threshold=self.similarity_threshold
-        )
-        
-        for result in results:
-            metadata = result.metadata
-            item_type = metadata.get("type", "")
-            
-            if item_type == "claim":
-                claim = CandidateEvidence(
-                    claim_id=result.id,
-                    claim_text=metadata.get("text", ""),
-                    chunk_id=metadata.get("chunk_id", ""),
-                    doc_id=metadata.get("doc_id", ""),
-                    section_path=metadata.get("section_path"),
-                    evidence_span=None,
-                    score=result.similarity,
-                    source="faiss",
-                    confidence=metadata.get("confidence", 0.5),
-                    claim_type=metadata.get("claim_type", "fact")
-                )
-                claims.append(claim)
-            elif item_type == "chunk":
-                # 将 chunk 也作为候选证据
-                claim = CandidateEvidence(
-                    claim_id=result.id,
-                    claim_text=metadata.get("text", ""),
-                    chunk_id=result.id,
-                    doc_id=metadata.get("doc_id", ""),
-                    section_path=metadata.get("section_path"),
-                    evidence_span=None,
-                    score=result.similarity * 0.8,  # chunk 权重稍低
-                    source="faiss_chunk",
-                    confidence=0.6,
-                    claim_type="context"
-                )
-                claims.append(claim)
-        
-        logger.info(f"FAISS 检索完成: {len(claims)} candidates found")
-        return claims
-        
     def _retrieve_by_vector(
         self, question: str, limit: int
     ) -> Tuple[List[CandidateEvidence], List[ConceptCandidate]]:
-        """向量检索（使用 Neo4j 向量索引作为后备）"""
+        """向量检索（使用 Neo4j 向量索引）"""
         claims = []
         concepts = []
         
-        # 如果 FAISS 可用，优先使用 FAISS
-        if self.faiss_enabled:
-            faiss_claims = self._retrieve_by_faiss(question, limit)
-            claims.extend(faiss_claims)
-            
-            # 同时从 FAISS 获取概念
-            question_embedding = get_embedding(question)
-            if question_embedding and len(question_embedding) == settings.embedding_dimension:
-                results = faiss_store.search(
-                    question_embedding,
-                    top_k=limit,
-                    threshold=self.similarity_threshold
-                )
-                for result in results:
-                    metadata = result.metadata
-                    if metadata.get("type") == "concept":
-                        concept_name = metadata.get("name", result.id)
-                        concept = ConceptCandidate(
-                            concept_id=result.id,
-                            concept_name=concept_name,
-                            domain=metadata.get("domain"),
-                            score=result.similarity,
-                            source="faiss"
-                        )
-                        concepts.append(concept)
-            
-            return claims[:limit], concepts[:limit]
-        
-        # 后备方案：使用 Neo4j 向量索引
         # 获取问题向量
         question_embedding = get_embedding(question)
         if not question_embedding or len(question_embedding) != settings.embedding_dimension:
@@ -512,6 +420,7 @@ class QueryService:
             )
             concepts.append(concept)
         
+        logger.info(f"Neo4j向量检索完成: {len(claims)} claims, {len(concepts)} concepts")
         return claims[:limit], concepts[:limit]
     
     def _retrieve_by_keyword(

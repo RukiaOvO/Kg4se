@@ -234,15 +234,6 @@ EMBEDDING_API_KEY=
 EMBEDDING_BASE_URL=
 
 # ============================================
-# FAISS 配置
-# ============================================
-FAISS_ENABLED=true
-FAISS_INDEX_TYPE=hnsw
-FAISS_INDEX_PATH=./data/faiss/index
-FAISS_SEARCH_TOP_K=10
-FAISS_SEARCH_THRESHOLD=0.7
-
-# ============================================
 # GraphRAG 配置
 # ============================================
 GRAPHRAG_ENABLED=true

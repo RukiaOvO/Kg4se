@@ -285,13 +285,11 @@ class InstanceNames:
     """预定义的实例名称"""
     
     NEO4J_CLIENT = "neo4j_client"
-    FAISS_STORE = "faiss_store"
     REDIS_CLIENT = "redis_client"
     QA_SERVICE = "qa_service"
     GRAPH_SERVICE = "graph_service"
     QUERY_SERVICE = "query_service"
     CONFIG_SERVICE = "config_service"
-    FAISS_INITIALIZER = "faiss_initializer"
     STORAGE = "storage"
     TRIPLET_EXTRACTOR = "triplet_extractor"
     ENTITY_LINKER = "entity_linker"
@@ -317,9 +315,6 @@ def initialize_instances():
     
     # Neo4j客户端（使用工厂模式延迟初始化）
     register_factory(InstanceNames.NEO4J_CLIENT, _create_neo4j_client)
-    
-    # FAISS向量存储（使用工厂模式延迟初始化）
-    register_factory(InstanceNames.FAISS_STORE, _create_faiss_store)
     
     # Redis客户端（使用工厂模式延迟初始化）
     register_factory(InstanceNames.REDIS_CLIENT, _create_redis_client)
@@ -359,15 +354,6 @@ def _create_neo4j_client():
     """创建 Neo4j 客户端实例"""
     from infra.neo4j_client import neo4j_client
     return neo4j_client
-
-
-def _create_faiss_store():
-    """创建 FAISS 存储实例"""
-    from infra.faiss_store import faiss_store
-    if faiss_store is None:
-        from infra.faiss_store import FaissStore
-        return FaissStore()
-    return faiss_store
 
 
 def _create_redis_client():

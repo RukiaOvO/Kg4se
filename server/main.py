@@ -18,7 +18,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes import upload, ingest, graph, settings, knowledge_card, qa, evaluation
 from infra.neo4j_client import neo4j_client
-from infra.faiss_store import faiss_store
 from config import settings as config_settings
 from config.instances import initialize_instances
 
@@ -51,20 +50,11 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️  Failed to initialize Neo4j client: {e}")
         logger.warning("   The API will start but database operations will fail.")
     
-    # Startup: Initialize FAISS
-    if config_settings.faiss_enabled:
-        try:
-            faiss_store.load_index()
-            logger.info(f"✅ FAISS index loaded from {config_settings.faiss_index_path}")
-        except Exception as e:
-            logger.warning(f"⚠️  FAISS index not found or failed to load: {e}")
-            logger.warning("   Starting with empty FAISS index")
-    
     # 打印配置摘要
     logger.info(f"\n=== 配置摘要 ===")
     logger.info(f"AI Provider: {config_settings.ai_provider}")
     logger.info(f"Embedding Model: {config_settings.embedding_model}")
-    logger.info(f"FAISS Enabled: {config_settings.faiss_enabled}")
+    logger.info(f"Vector Store: Neo4j")
     logger.info(f"Debug Mode: {config_settings.debug_mode}")
     
     yield
@@ -75,14 +65,6 @@ async def lifespan(app: FastAPI):
     if neo4j_client.driver:
         neo4j_client.close()
         logger.info("✅ Neo4j client closed")
-    
-    # Shutdown: Save FAISS index
-    if config_settings.faiss_enabled:
-        try:
-            faiss_store.save_index()
-            logger.info("✅ FAISS index saved")
-        except Exception as e:
-            logger.warning(f"⚠️  Failed to save FAISS index: {e}")
 
 
 # Create FastAPI app
@@ -138,8 +120,7 @@ async def get_config_summary():
     return {
         "ai_provider": config_settings.ai_provider,
         "embedding_model": config_settings.embedding_model,
-        "faiss_enabled": config_settings.faiss_enabled,
-        "faiss_index_type": config_settings.faiss_index_type
+        "vector_store": "neo4j"
     }
 
 

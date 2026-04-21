@@ -8,7 +8,7 @@
     model = settings.embedding_model
     
     # 获取全局实例
-    faiss_store = get_instance("faiss_store")
+    neo4j_client = get_instance("neo4j_client")
 """
 
 from .settings import Settings, settings

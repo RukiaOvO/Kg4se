@@ -64,7 +64,8 @@ class GrokClient(BaseAIClient):
         # X Grok 可以通过 OpenAI 兼容接口访问
         self.client = OpenAI(
             api_key=api_key,
-            base_url=base_url or "https://api.x.ai/v1"
+            base_url=base_url or "https://api.x.ai/v1",
+            timeout=30.0
         )
 
     def chat_completion(
@@ -116,7 +117,8 @@ class OpenAIClient(BaseAIClient):
         super().__init__(model)
         self.client = OpenAI(
             api_key=api_key,
-            base_url=base_url
+            base_url=base_url,
+            timeout=30.0
         )
     
     def chat_completion(
@@ -194,7 +196,8 @@ class GoogleGeminiClient(BaseAIClient):
         # Google Gemini 可以通过 OpenAI 兼容接口访问
         self.client = OpenAI(
             api_key=api_key,
-            base_url=base_url or "https://generativelanguage.googleapis.com/v1beta/openai/"
+            base_url=base_url or "https://generativelanguage.googleapis.com/v1beta/openai/",
+            timeout=30.0
         )
     
     def chat_completion(
@@ -249,9 +252,14 @@ class OpenAICompatibleClient(BaseAIClient):
         logger.info(f"   Model: {model}")
         logger.info(f"   Base URL: {normalized_base_url}")
         
+        # 根据是否是本地服务（Ollama）设置不同的超时时间
+        is_local = 'localhost' in normalized_base_url or '127.0.0.1' in normalized_base_url
+        timeout = 120.0 if is_local else 30.0
+        
         self.client = OpenAI(
             api_key=api_key,
-            base_url=normalized_base_url
+            base_url=normalized_base_url,
+            timeout=timeout
         )
     
     def chat_completion(
