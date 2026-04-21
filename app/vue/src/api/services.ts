@@ -217,6 +217,11 @@ export interface DocumentListResponse {
     claim_count: number
     processing_status: string
   }>
+  stats?: {
+    total: number
+    completed: number
+    pending: number
+  }
 }
 
 export interface DocumentDetail {
@@ -245,12 +250,22 @@ export interface DocumentDetail {
   processing_status: string
 }
 
-export const listDocuments = (skip: number = 0, limit: number = 50, sortBy: string = 'created_at'): Promise<DocumentListResponse> =>
+export const listDocuments = (
+  skip: number = 0, 
+  limit: number = 50, 
+  sortBy: string = 'created_at',
+  status: string = '',
+  kind: string = '',
+  keyword: string = ''
+): Promise<DocumentListResponse> =>
   api.get('/uploads', {
     params: {
       skip,
       limit,
       sort_by: sortBy,
+      status,
+      kind,
+      keyword,
       _: Date.now()  // 添加时间戳参数防止浏览器缓存
     }
   })

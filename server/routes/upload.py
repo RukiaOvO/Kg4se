@@ -178,7 +178,10 @@ async def upload_file(file: UploadFile = File(...)):
 async def list_documents(
     skip: int = 0,
     limit: int = 50,
-    sort_by: str = "created_at"  # "created_at" or "filename"
+    sort_by: str = "created_at",  # "created_at", "filename", or "size"
+    status: str = "",  # Filter by processing_status: "completed", "uploaded", "processing", "pending"
+    kind: str = "",  # Filter by document kind: "pdf", "md", "txt", etc.
+    keyword: str = ""  # Search by filename
 ):
     """
     获取所有已上传的文档列表
@@ -186,7 +189,10 @@ async def list_documents(
     Args:
         skip: 跳过的文档数
         limit: 返回的最大文档数
-        sort_by: 排序字段 (created_at 或 filename)
+        sort_by: 排序字段 (created_at, filename, or size)
+        status: 筛选处理状态
+        kind: 筛选文档类型
+        keyword: 搜索关键词（文件名匹配）
     
     Returns:
         {
@@ -204,52 +210,70 @@ async def list_documents(
                     "claim_count": ...,
                     "processing_status": "..."
                 }
-            ]
+            ],
+            "stats": {
+                "total": 总文档数,
+                "completed": 已完成数,
+                "pending": 待处理数
+            }
         }
     """
     # 合法化参数
     skip = max(0, skip)
     limit = min(limit, 100)  # 最多返回 100 条
     
+    # 构建基础查询和参数
+    match_clause = "MATCH (d:Document)"
+    where_conditions = []
+    params = {}
+    
+    # 状态筛选
+    if status:
+        if status == "pending":
+            where_conditions.append("d.processing_status IN ['uploaded', 'pending']")
+        else:
+            where_conditions.append("d.processing_status = $status")
+            params["status"] = status
+    
+    # 类型筛选
+    if kind:
+        where_conditions.append("d.kind = $kind")
+        params["kind"] = kind
+    
+    # 关键词搜索
+    if keyword:
+        where_conditions.append("toLower(d.filename) CONTAINS toLower($keyword)")
+        params["keyword"] = keyword
+    
+    # 构建 WHERE 子句
+    where_clause = " WHERE " + " AND ".join(where_conditions) if where_conditions else ""
+    
     # 获取总数
-    total_result = neo4j_client.execute_query(
-        "MATCH (d:Document) RETURN count(d) as total"
-    )
+    count_query = f"{match_clause}{where_clause} RETURN count(d) as total"
+    total_result = neo4j_client.execute_query(count_query, params)
     total = total_result[0]["total"] if total_result else 0
+    
+    # 获取统计数据（不应用筛选条件）
+    stats_query = """
+    MATCH (d:Document)
+    RETURN 
+        count(d) as total,
+        count(CASE WHEN d.processing_status = 'completed' THEN d END) as completed,
+        count(CASE WHEN d.processing_status IN ['uploaded', 'pending'] THEN d END) as pending
+    """
+    stats_result = neo4j_client.execute_query(stats_query)
+    stats = stats_result[0] if stats_result else {"total": 0, "completed": 0, "pending": 0}
     
     # 构建排序子句
     order_clause = "d.created_at DESC"
     if sort_by == "filename":
         order_clause = "d.filename ASC"
+    elif sort_by == "size":
+        order_clause = "d.size DESC"
     
     # 获取文档列表
-    # query = f"""
-    # MATCH (d:Document)
-    # OPTIONAL MATCH (d)-[rel]-(related)
-    # WITH d, count(DISTINCT rel) as rel_count,
-    #      count(DISTINCT CASE WHEN 'Chunk' IN labels(related) THEN related END) as chunk_count,
-    #      count(DISTINCT CASE WHEN 'Concept' IN labels(related) THEN related END) as concept_count,
-    #      count(DISTINCT CASE WHEN 'Claim' IN labels(related) THEN related END) as claim_count
-    # RETURN DISTINCT
-    #     d.id AS id,
-    #     d.filename AS filename,
-    #     d.kind AS kind,
-    #     d.size AS size,
-    #     d.created_at AS created_at,
-    #     d.updated_at AS updated_at,
-    #     d.checksum AS checksum,
-    #     chunk_count,
-    #     concept_count,
-    #     claim_count,
-    #     rel_count,
-    #     coalesce(d.processing_status, "") AS processing_status
-    # ORDER BY {order_clause}
-    # SKIP {skip}
-    # LIMIT {limit}
-    # """
-
     query = f"""
-    MATCH (d:Document)
+    {match_clause}{where_clause}
     RETURN
         d.id AS id,
         d.filename AS filename,
@@ -267,7 +291,7 @@ async def list_documents(
     LIMIT {limit}
     """
     
-    results = neo4j_client.execute_query(query)
+    results = neo4j_client.execute_query(query, params)
     
     documents = []
     for row in results:
@@ -293,7 +317,12 @@ async def list_documents(
     
     return {
         "total": total,
-        "documents": documents
+        "documents": documents,
+        "stats": {
+            "total": stats["total"],
+            "completed": stats["completed"],
+            "pending": stats["pending"]
+        }
     }
 
 

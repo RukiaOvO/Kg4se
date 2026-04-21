@@ -136,13 +136,26 @@
           <n-data-table
             :columns="columns"
             :data="documents"
-            :pagination="pagination"
             :loading="loading"
             :scroll-x="1200"
             striped
             :row-key="(row) => row.id"
             v-model:checked-row-keys="selectedDocs"
           />
+          
+          <!-- 独立分页组件 -->
+          <div style="display: flex; justify-content: center; margin-top: 20px;">
+            <n-pagination
+              v-model:page="pagination.page"
+              v-model:page-size="pagination.pageSize"
+              :page-count="pagination.pageCount"
+              :item-count="pagination.itemCount"
+              :show-size-picker="true"
+              :page-sizes="[10, 20, 50, 100]"
+              @update:page="handlePageChange"
+              @update:page-size="handlePageSizeChange"
+            />
+          </div>
         </n-spin>
       </n-card>
     </n-space>
@@ -319,18 +332,30 @@ const selectedDocs = ref<string[]>([]) // 选中的文档ID
 // State
 const loading = ref(false)
 const documents = ref<DocumentListResponse['documents']>([])
+const totalCount = ref(0)
+const completedCount = ref(0)
+const pendingCount = ref(0)
+
 const pagination = ref({
   page: 1,
   pageSize: 20,
   pageCount: 1,
-  prefix: (info: any) => `共 ${info.itemCount} 条`,
-  onChange: (page: number) => {
-    pagination.value.page = page
-    loadDocuments()
-  }
+  itemCount: 0,
+  showSizePicker: true,
+  pageSizes: [10, 20, 50, 100],
+  prefix: (info: any) => `共 ${info.itemCount} 条`
 })
 
-const sortBy = ref<'created_at' | 'filename'>('created_at')
+const handlePageChange = () => {
+  loadDocuments()
+}
+
+const handlePageSizeChange = () => {
+  pagination.value.page = 1
+  loadDocuments()
+}
+
+const sortBy = ref<'created_at' | 'filename' | 'size'>('created_at')
 const showDetailModal = ref(false)
 const selectedDocument = ref<DocumentListResponse['documents'][0] | null>(null)
 const documentDetail = ref<DocumentDetail | null>(null)
@@ -344,59 +369,42 @@ const canPreview = computed(() => {
 })
 
 // Computed
-const totalDocuments = computed(() => documents.value.length)
-const completedDocuments = computed(() => documents.value.filter(d => d.processing_status === 'completed').length)
-const pendingDocuments = computed(() => documents.value.filter(d => d.processing_status === 'uploaded').length)
+const totalDocuments = computed(() => totalCount.value)
+const completedDocuments = computed(() => completedCount.value)
+const pendingDocuments = computed(() => pendingCount.value)
 
 // Methods
-// const loadDocuments = async () => {
-//   loading.value = true
-//   try {
-//     const skip = (pagination.value.page - 1) * pagination.value.pageSize
-//     const result = await listDocuments(skip, pagination.value.pageSize, sortBy.value)
-//     documents.value = result.documents
-//     pagination.value.pageCount = Math.ceil(result.total / pagination.value.pageSize)
-//   } catch (error: any) {
-//     message.error(`加载文档列表失败: ${error.message}`)
-//   } finally {
-//     loading.value = false
-//   }
-// }
-
 const loadDocuments = async () => {
   loading.value = true
   try {
     const skip = (pagination.value.page - 1) * pagination.value.pageSize
-    const result = await listDocuments(skip, pagination.value.pageSize, sortBy.value)
+    
+    // 将筛选条件传递给后端
+    const status = filterStatus.value === 'all' ? '' : filterStatus.value
+    const kind = filterType.value === 'all' ? '' : filterType.value
+    const keyword = searchKeyword.value.trim()
+    
+    const result = await listDocuments(skip, pagination.value.pageSize, sortBy.value, status, kind, keyword)
 
-    // 前端筛选
-    let filtered = result.documents
-
-    // 状态筛选
-    if (filterStatus.value !== 'all') {
-      filtered = filtered.filter(d => {
-        if (filterStatus.value === 'pending') {
-          return d.processing_status === 'uploaded' || d.processing_status === 'pending'
-        }
-        return d.processing_status === filterStatus.value
-      })
+    // 更新文档列表
+    documents.value = result.documents
+    
+    // 更新总数和分页
+    totalCount.value = result.total
+    pagination.value.itemCount = result.total
+    pagination.value.pageCount = Math.ceil(result.total / pagination.value.pageSize)
+    
+    // 更新统计数据（来自后端）
+    if (result.stats) {
+      completedCount.value = result.stats.completed
+      pendingCount.value = result.stats.pending
+    } else {
+      // 降级处理：从当前页数据计算（仅作为备份）
+      completedCount.value = result.documents.filter(d => d.processing_status === 'completed').length
+      pendingCount.value = result.documents.filter(d => 
+        d.processing_status === 'uploaded' || d.processing_status === 'pending'
+      ).length
     }
-
-    // 类型筛选
-    if (filterType.value !== 'all') {
-      filtered = filtered.filter(d => d.kind === filterType.value)
-    }
-
-    // 搜索筛选
-    if (searchKeyword.value.trim()) {
-      const keyword = searchKeyword.value.toLowerCase()
-      filtered = filtered.filter(d =>
-        d.filename.toLowerCase().includes(keyword)
-      )
-    }
-
-    documents.value = filtered
-    pagination.value.pageCount = Math.ceil(filtered.length / pagination.value.pageSize)
 
     // 重置选中状态
     selectedDocs.value = []
@@ -454,57 +462,54 @@ const handleViewGraph = (doc: DocumentListResponse['documents'][0]) => {
 }
 
 const handleDeleteDocument = async (doc: DocumentListResponse['documents'][0]) => {
-  try {
-    // 创建对话框
-    const modal = window.$dialog?.create({
-      title: '确认删除',
-      content: `确定要删除文档 "${doc.filename}" 吗？此操作不可恢复。`,
-      positiveText: '删除',
-      negativeText: '取消',
-      type: 'error',
-      onPositiveClick: async () => {
-        try {
-          const loadingMsg = message.loading('正在删除文档...', {
-            duration: 0 // 持续显示
-          })
-
-          // 调用删除 API
-          await deleteDocument(doc.id)
-
-          // 关闭加载提示
-          loadingMsg.destroy()
-
-          // 显示成功消息
-          message.success('文档删除成功')
-
-          // 如果当前正在查看的文档被删除，关闭详情弹窗
-          if (selectedDocument.value?.id === doc.id) {
-            showDetailModal.value = false
-            selectedDocument.value = null
-            documentDetail.value = null
-          }
-
-          // 重新加载文档列表
-          await loadDocuments()
-
-        } catch (error: any) {
-          message.error(`删除文档失败: ${error.message || '未知错误'}`)
-        }
-        return true // 允许对话框关闭
-      },
-      onNegativeClick: () => {
-        // 用户取消
-        return true
-      }
-    })
-
-  } catch (error: any) {
-    message.error(`创建确认对话框失败: ${error.message}`)
+  const dialog = (window as any).$dialog
+  if (!dialog) {
+    message.error('对话框组件不可用')
+    return
   }
+  
+  dialog.create({
+    title: '确认删除',
+    content: `确定要删除文档 "${doc.filename}" 吗？此操作不可恢复。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    type: 'error',
+    onPositiveClick: async () => {
+      try {
+        const loadingMsg = message.loading('正在删除文档...', {
+          duration: 0
+        })
+
+        await deleteDocument(doc.id)
+
+        loadingMsg.destroy()
+        message.success('文档删除成功')
+
+        if (selectedDocument.value?.id === doc.id) {
+          showDetailModal.value = false
+          selectedDocument.value = null
+          documentDetail.value = null
+        }
+
+        await loadDocuments()
+
+      } catch (error: any) {
+        message.error(`删除文档失败: ${error.message || '未知错误'}`)
+      }
+      return true
+    },
+    onNegativeClick: () => true
+  })
 }
 
 const handleBatchDelete = async () => {
-  const modal = window.$dialog?.create({
+  const dialog = (window as any).$dialog
+  if (!dialog) {
+    message.error('对话框组件不可用')
+    return
+  }
+  
+  dialog.create({
     title: '确认批量删除',
     content: `确定要删除选中的 ${selectedDocs.value.length} 个文档吗？此操作不可恢复。`,
     positiveText: '删除',
@@ -516,7 +521,6 @@ const handleBatchDelete = async () => {
           duration: 0
         })
 
-        // 批量删除
         for (const docId of selectedDocs.value) {
           try {
             await deleteDocument(docId)
@@ -528,7 +532,6 @@ const handleBatchDelete = async () => {
         loadingMsg.destroy()
         message.success(`已删除 ${selectedDocs.value.length} 个文档`)
 
-        // 重新加载
         await loadDocuments()
 
       } catch (error: any) {
@@ -547,7 +550,7 @@ const handleSearch = () => {
 // Table columns
 const columns = computed(() => [
   {
-    type: 'selection',
+    type: 'selection' as const,
     width: 40
   },
   {
