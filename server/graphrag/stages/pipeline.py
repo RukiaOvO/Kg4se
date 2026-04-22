@@ -610,43 +610,128 @@ class GraphRAGPipeline:
             return
         
         stage_start = time.time()
-        logger.info(f"[Stage 6] 开始图谱存储")
+        logger.info(f"[Stage 6] 开始图谱存储: doc_id={doc_id}, chunks={len(chunks)}, entities={len(entities)}, claims={len(claims)}, relations={len(relations)}")
+        
+        # 打印第一个 chunk 的详细信息用于调试
+        if chunks:
+            first_chunk = chunks[0]
+            logger.info(f"[Stage 6] 第一个Chunk详情: id={first_chunk.id}, doc_id={first_chunk.doc_id}, text_len={len(first_chunk.text)}")
         
         chunks_stored = 0
         entities_stored = 0
         claims_stored = 0
         relations_stored = 0
+        mentions_relations_stored = 0
+        contains_claim_relations_stored = 0
+        contains_relations_stored = 0
+        evidence_from_relations_stored = 0
+        belongs_to_theme_relations_stored = 0
         
+        # 1. 存储 Chunk 节点
+        logger.info(f"[Stage 6] 开始存储 {len(chunks)} 个 Chunk 节点")
         for chunk in chunks:
             try:
                 self.graph_service.store_chunk(chunk.model_dump())
                 chunks_stored += 1
+                
+                # 创建 Document → Chunk 的 CONTAINS 关系
+                try:
+                    self.graph_service.store_relationship(
+                        rel_type="CONTAINS",
+                        source_id=doc_id,
+                        target_id=chunk.id,
+                        rel_data={"chunk_index": chunk.chunk_index}
+                    )
+                    contains_relations_stored += 1
+                except Exception as e:
+                    logger.warning(f"[Stage 6] 存储 CONTAINS 关系失败: {e}")
+                    
             except Exception as e:
                 logger.warning(f"[Stage 6] 存储Chunk {chunk.id} 失败: {e}")
         
+        logger.info(f"[Stage 6] Chunk 存储完成: {chunks_stored}/{len(chunks)}, CONTAINS关系: {contains_relations_stored}")
+        
+        # 2. 存储实体节点（Concept）
+        logger.info(f"[Stage 6] 开始存储 {len(entities)} 个实体节点并创建 MENTIONS 关系")
         for entity in entities:
             try:
-                entity_data = {
-                    "id": entity.get("concept_id") or hashlib.sha256(
-                        entity.get("concept_name", "").encode()
-                    ).hexdigest()[:16],
+                concept_id = entity.get("concept_id") or hashlib.sha256(
+                    entity.get("concept_name", "").encode()
+                ).hexdigest()[:16]
+                
+                concept_data = {
+                    "id": concept_id,
                     "name": entity.get("concept_name"),
                     "description": entity.get("description"),
                     "domain": "software_engineering",
                     "embedding": entity.get("embedding")
                 }
                 
-                if self.graph_service.store_entity("KnowledgePoint", entity_data):
+                if self.graph_service.store_entity("Concept", concept_data):
                     entities_stored += 1
                     
+                    # 创建 Chunk → Concept 的 MENTIONS 关系
+                    chunk_id = entity.get("chunk_id")
+                    if chunk_id:
+                        try:
+                            self.graph_service.store_relationship(
+                                rel_type="MENTIONS",
+                                source_id=chunk_id,
+                                target_id=concept_id,
+                                rel_data={"confidence": entity.get("confidence", 0.8)}
+                            )
+                            mentions_relations_stored += 1
+                        except Exception as e:
+                            logger.warning(f"[Stage 6] 存储 MENTIONS 关系失败: {e}")
+                        
+                        # 创建 Concept → Chunk 的 EVIDENCE_FROM 关系
+                        try:
+                            self.graph_service.store_relationship(
+                                rel_type="EVIDENCE_FROM",
+                                source_id=concept_id,
+                                target_id=chunk_id,
+                                rel_data={}
+                            )
+                            evidence_from_relations_stored += 1
+                        except Exception as e:
+                            logger.warning(f"[Stage 6] 存储 EVIDENCE_FROM 关系失败: {e}")
+                            
             except Exception as e:
                 logger.warning(f"[Stage 6] 存储实体失败: {e}")
         
+        # 3. 存储 Claim 节点
+        logger.info(f"[Stage 6] 开始存储 {len(claims)} 个 Claim 节点并创建 CONTAINS_CLAIM 关系")
         for claim in claims:
             try:
                 self.graph_service.store_claim(claim.model_dump())
                 claims_stored += 1
                 
+                # 创建 Chunk → Claim 的 CONTAINS_CLAIM 关系
+                if claim.chunk_id:
+                    try:
+                        self.graph_service.store_relationship(
+                            rel_type="CONTAINS_CLAIM",
+                            source_id=claim.chunk_id,
+                            target_id=claim.id,
+                            rel_data={"confidence": claim.confidence}
+                        )
+                        contains_claim_relations_stored += 1
+                    except Exception as e:
+                        logger.warning(f"[Stage 6] 存储 CONTAINS_CLAIM 关系失败: {e}")
+                    
+                    # 创建 Claim → Chunk 的 EVIDENCE_FROM 关系
+                    try:
+                        self.graph_service.store_relationship(
+                            rel_type="EVIDENCE_FROM",
+                            source_id=claim.id,
+                            target_id=claim.chunk_id,
+                            rel_data={"evidence_span": claim.evidence_span}
+                        )
+                        evidence_from_relations_stored += 1
+                    except Exception as e:
+                        logger.warning(f"[Stage 6] 存储 EVIDENCE_FROM 关系失败: {e}")
+                
+                # 存储带证据的 Claim
                 if claim.chunk_id:
                     self.graph_service.store_with_provenance(
                         node={"id": claim.id, "type": "Claim", "text": claim.text},
@@ -657,6 +742,8 @@ class GraphRAGPipeline:
             except Exception as e:
                 logger.warning(f"[Stage 6] 存储论断 {claim.id} 失败: {e}")
         
+        # 4. 存储 Claim 之间的关系
+        logger.info(f"[Stage 6] 开始存储 {len(relations)} 个 Claim 之间的关系")
         for relation in relations:
             try:
                 self.graph_service.store_relation({
@@ -679,11 +766,18 @@ class GraphRAGPipeline:
             "entities_stored": entities_stored,
             "claims_stored": claims_stored,
             "relations_stored": relations_stored,
+            "mentions_relations_stored": mentions_relations_stored,
+            "contains_claim_relations_stored": contains_claim_relations_stored,
+            "contains_relations_stored": contains_relations_stored,
+            "evidence_from_relations_stored": evidence_from_relations_stored,
+            "belongs_to_theme_relations_stored": belongs_to_theme_relations_stored,
             "execution_time": time.time() - stage_start
         }
         
         logger.info(f"[Stage 6] 完成: chunks={chunks_stored}, entities={entities_stored}, "
-                   f"claims={claims_stored}, relations={relations_stored}")
+                   f"claims={claims_stored}, relations={relations_stored}, "
+                   f"mentions={mentions_relations_stored}, contains_claim={contains_claim_relations_stored}, "
+                   f"contains={contains_relations_stored}, evidence_from={evidence_from_relations_stored}")
     
     async def _run_stage8(
         self,
@@ -736,6 +830,7 @@ class GraphRAGPipeline:
         
         doc_data = {
             "id": doc_id,
+            "doc_id": doc_id,  # 添加 doc_id 属性，确保与其他节点保持一致
             "title": document_meta.get("title", doc_id) if document_meta else doc_id,
             "source_type": document_meta.get("source_type", "unknown") if document_meta else "unknown",
             "url": document_meta.get("url") if document_meta else None,

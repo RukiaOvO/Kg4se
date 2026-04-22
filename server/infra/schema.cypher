@@ -15,7 +15,7 @@ FOR (d:Document) REQUIRE d.id IS UNIQUE;
 CREATE CONSTRAINT document_checksum_unique IF NOT EXISTS 
 FOR (d:Document) REQUIRE d.checksum IS UNIQUE;
 
-// Concept 节点约束（保留现有）
+// Concept 节点约束（保留现有 - 支持增量构建的概念合并）
 CREATE CONSTRAINT concept_name_unique IF NOT EXISTS 
 FOR (c:Concept) REQUIRE c.name IS UNIQUE;
 

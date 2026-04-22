@@ -49,27 +49,25 @@ class MetricsService:
             "modularity": 0.0
         }
 
-        # 1) 节点计数和孤立节点比例（通过 MENTIONS 关系查找该文档的概念节点）
-        # Concept 节点本身没有 doc_id，需要通过 MENTIONS 关系查找
+        # 1) 节点计数和孤立节点比例（通过 Document-[:CONTAINS]->Chunk-[:MENTIONS]->Concept 路径查找）
         isolation_query = """
-        MATCH (d:Document {id: $doc_id})-[:MENTIONS]-(c:Concept)
+        MATCH (d:Document {id: $doc_id})-[:CONTAINS]->(:Chunk)-[:MENTIONS]->(c:Concept)
         OPTIONAL MATCH (c)-[r]-(other)
         WHERE (other:Concept) OR (other:Chunk)
-        WITH c, count(r) AS deg
+        WITH DISTINCT c, count(r) AS deg
         RETURN sum(CASE WHEN deg = 0 THEN 1 ELSE 0 END) AS isolated_nodes,
-               count(c) AS total_nodes
+               count(DISTINCT c) AS total_nodes
         """
         iso_result = self.neo4j_client.execute_query(isolation_query, {"doc_id": doc_id})
         isolated_nodes = iso_result[0].get("isolated_nodes", 0) if iso_result else 0
         total_nodes = iso_result[0].get("total_nodes", 0) if iso_result else 0
 
-        # 2) 边数与平均度数（避免重复计数，使用 id 约束去重）
-        # 统计与该文档关联的所有概念节点之间的边
+        # 2) 边数与平均度数（避免重复计数，使用 elementId 约束去重）
         degree_query = """
-        MATCH (d:Document {id: $doc_id})-[:MENTIONS]-(c1:Concept)
+        MATCH (d:Document {id: $doc_id})-[:CONTAINS]->(:Chunk)-[:MENTIONS]->(c1:Concept)
         MATCH (c1)-[r]-(c2:Concept)
-        WHERE id(c1) <= id(c2)
-        RETURN count(r) AS edge_count
+        WHERE elementId(c1) < elementId(c2)
+        RETURN count(DISTINCT r) AS edge_count
         """
         deg_result = self.neo4j_client.execute_query(degree_query, {"doc_id": doc_id})
         edge_count = deg_result[0].get("edge_count", 0) if deg_result else 0
@@ -98,7 +96,7 @@ class MetricsService:
         # 5) 社区模块度近似（同社区边比例，文档子图范围）
         modularity_query = """
         MATCH (n)-[r]-(m)
-        WHERE n.doc_id = $doc_id AND m.doc_id = $doc_id AND id(n) <= id(m)
+        WHERE n.doc_id = $doc_id AND m.doc_id = $doc_id AND elementId(n) < elementId(m)
               AND n.community_id IS NOT NULL AND m.community_id IS NOT NULL
         RETURN count(r) AS community_edges,
                sum(CASE WHEN n.community_id = m.community_id THEN 1 ELSE 0 END) AS intra_edges

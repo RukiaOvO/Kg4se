@@ -1,19 +1,30 @@
 # 谓词白名单与映射配置
-# 优化版本：仅包含5种标准谓词，用于软件工程领域知识提取
+# 优化版本：包含传统模式和 GraphRAG Pipeline 模式的谓词定义
 
 # 配置版本号（用于治理元数据追踪）
 version: "2.0.0-software-engineering"
 
-# 标准谓词集合（仅包含5种）
+# 标准谓词集合（包含传统模式和 GraphRAG Pipeline 模式）
 standard:
+  # 传统模式（KnowledgePoint 体系）
   - BELONGS_TO       # 子知识点属于父知识点
   - FROM             # 知识点从文档中提取
   - PRACTICES_IS     # 题目中提到知识点
   - HAS_TIMESTAMP    # 文档的更新时间戳
   - IS               # 知识点的内容是什么
+  # GraphRAG Pipeline 模式
+  - MENTIONS         # Chunk 提及 Concept
+  - CONTAINS_CLAIM   # Chunk 包含 Claim
+  - BELONGS_TO_THEME # Concept 属于 Theme
+  - RELATED_TO       # Concept 之间的关联
+  - SUPPORTS         # Claim 支持 Concept
+  - CONTRADICTS      # Claim 反驳 Concept
+  - EVIDENCE_FROM    # 证据来源
+  - CONTAINS         # Document 包含 Chunk
+  - RELATION         # 通用关系（用于 Claim 之间的关系）
 
 # 自然语言谓词映射到标准谓词
-# 注意：只有这5个标准谓词被允许，所有其他映射都会被拒绝
+# 传统模式映射
 mappings:
   # BELONGS_TO 映射
   "属于": BELONGS_TO
@@ -49,10 +60,54 @@ mappings:
   "定义": IS
   "内容是": IS
   "描述为": IS
+  
+  # GraphRAG Pipeline 模式映射
+  # MENTIONS 映射
+  "提及": MENTIONS
+  "提到": MENTIONS
+  "引用": MENTIONS
+  "references": MENTIONS
+  
+  # CONTAINS_CLAIM 映射
+  "包含论断": CONTAINS_CLAIM
+  "包含声明": CONTAINS_CLAIM
+  "主张": CONTAINS_CLAIM
+  
+  # BELONGS_TO_THEME 映射
+  "属于主题": BELONGS_TO_THEME
+  "归类于": BELONGS_TO_THEME
+  "主题分类": BELONGS_TO_THEME
+  
+  # RELATED_TO 映射
+  "关联": RELATED_TO
+  "相关": RELATED_TO
+  "关联于": RELATED_TO
+  "与...相关": RELATED_TO
+  
+  # SUPPORTS 映射
+  "支持": SUPPORTS
+  "证实": SUPPORTS
+  "佐证": SUPPORTS
+  
+  # CONTRADICTS 映射
+  "反驳": CONTRADICTS
+  "矛盾": CONTRADICTS
+  "冲突": CONTRADICTS
+  "反对": CONTRADICTS
+  
+  # EVIDENCE_FROM 映射
+  "证据来自": EVIDENCE_FROM
+  "来源于证据": EVIDENCE_FROM
+  "基于": EVIDENCE_FROM
+  
+  # CONTAINS 映射
+  "包含": CONTAINS
+  "含有": CONTAINS
 
 # 类型约束（头类型, 谓词, 尾类型）白名单
-# 仅允许软件工程领域的知识点间关系
+# 传统模式类型约束
 type_constraints:
+  # 传统模式（KnowledgePoint 体系）
   # BELONGS_TO: KnowledgePoint -> KnowledgePoint
   - source: KnowledgePoint
     predicate: BELONGS_TO
@@ -77,6 +132,68 @@ type_constraints:
   - source: KnowledgePoint
     predicate: IS
     target: [Content]
+  
+  # GraphRAG Pipeline 模式类型约束
+  # MENTIONS: Chunk -> Concept
+  - source: Chunk
+    predicate: MENTIONS
+    target: [Concept]
+  
+  # CONTAINS_CLAIM: Chunk -> Claim
+  - source: Chunk
+    predicate: CONTAINS_CLAIM
+    target: [Claim]
+  
+  # BELONGS_TO_THEME: Concept -> Theme
+  - source: Concept
+    predicate: BELONGS_TO_THEME
+    target: [Theme]
+  # BELONGS_TO_THEME: Claim -> Theme（也支持 Claim 直接属于 Theme）
+  - source: Claim
+    predicate: BELONGS_TO_THEME
+    target: [Theme]
+  
+  # RELATED_TO: Concept -> Concept
+  - source: Concept
+    predicate: RELATED_TO
+    target: [Concept]
+  
+  # SUPPORTS: Claim -> Concept
+  - source: Claim
+    predicate: SUPPORTS
+    target: [Concept]
+  # SUPPORTS: Claim -> Claim
+  - source: Claim
+    predicate: SUPPORTS
+    target: [Claim]
+  
+  # CONTRADICTS: Claim -> Concept
+  - source: Claim
+    predicate: CONTRADICTS
+    target: [Concept]
+  # CONTRADICTS: Claim -> Claim
+  - source: Claim
+    predicate: CONTRADICTS
+    target: [Claim]
+  
+  # EVIDENCE_FROM: Claim -> Chunk
+  - source: Claim
+    predicate: EVIDENCE_FROM
+    target: [Chunk]
+  # EVIDENCE_FROM: Concept -> Chunk
+  - source: Concept
+    predicate: EVIDENCE_FROM
+    target: [Chunk]
+  
+  # CONTAINS: Document -> Chunk
+  - source: Document
+    predicate: CONTAINS
+    target: [Chunk]
+  
+  # RELATION: Claim -> Claim（Claim 之间的通用关系）
+  - source: Claim
+    predicate: RELATION
+    target: [Claim]
 
 # 未匹配谓词处理策略
 unmatched_strategy:

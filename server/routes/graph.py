@@ -70,6 +70,7 @@ async def visualize_graph(
                 labels = list(node.labels) if hasattr(node, "labels") else []
                 
                 if not labels:
+                    # GraphRAG pipeline 创建的新类型
                     if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
                         labels = ["Document"]
                     elif node_props.get("type") == "chunk" or (node_props.get("chunk_id") is not None):
@@ -78,6 +79,11 @@ async def visualize_graph(
                         labels = ["Concept"]
                     elif node_props.get("type") == "entity":
                         labels = ["Entity"]
+                    # GraphRAG 新增类型
+                    elif node_props.get("summary") and node_props.get("keywords"):
+                        labels = ["Theme"]
+                    elif node_props.get("text") and node_props.get("confidence") is not None:
+                        labels = ["Claim"]
                     else:
                         labels = ["Concept"]
                 
@@ -97,7 +103,7 @@ async def visualize_graph(
                     "id": node_id,
                     "labels": labels,
                     "type": labels[0] if labels else "Unknown",
-                    "label": node_props.get("name") or node_props.get("filename") or node_id,
+                    "label": node_props.get("label") or node_props.get("name") or node_props.get("filename") or (node_props.get("summary", "")[:30] if node_props.get("summary") else node_id),
                     "properties": node_props,
                     "degree": 0
                 }
@@ -435,21 +441,6 @@ async def get_document_graph(
     LIMIT {limit}
     """
     
-    # 获取边（两个端点都在文档相关节点中，排除其他Document节点）
-    edge_query = f"""
-    MATCH (d:Document {{id: $doc_id}})
-    OPTIONAL MATCH (d)-[*1..{depth}]-(n)
-    WHERE NOT (n:Document) OR n.id = $doc_id
-    WITH d, COLLECT(DISTINCT n) AS related_nodes
-    WITH related_nodes + [d] AS all_nodes
-    UNWIND all_nodes AS source_node
-    UNWIND all_nodes AS target_node
-    MATCH (source_node)-[r]->(target_node)
-    WHERE source_node <> target_node
-    RETURN DISTINCT source_node AS n, r, target_node AS m
-    LIMIT {edge_limit}
-    """
-    
     node_results = neo4j_client.execute_query(node_query, {"doc_id": document_id})
     
     # Collect node info and build nodes_dict
@@ -462,9 +453,20 @@ async def get_document_graph(
             node = record["n"]
             node_props = dict(node) if isinstance(node, dict) else node
             node_props = neo4j_client._convert_neo4j_types(node_props)
-            labels = list(node.labels) if hasattr(node, "labels") else []
             
+            # 关键修复：优先从 _labels 读取Neo4j原始标签
+            # neo4j_client._convert_neo4j_types 已经将 Node.labels 存储在 _labels 中
+            labels = node_props.pop('_labels', None) or []
+            if isinstance(labels, str):
+                labels = [labels]
+            
+            # 如果仍然没有labels，尝试从原始node对象获取（兼容旧代码）
+            if not labels and hasattr(node, "labels"):
+                labels = list(node.labels)
+            
+            # 如果仍然没有labels，通过属性推断类型
             if not labels:
+                # GraphRAG pipeline 创建的新类型
                 if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
                     labels = ["Document"]
                 elif node_props.get("type") == "chunk" or (node_props.get("chunk_id") is not None):
@@ -473,6 +475,11 @@ async def get_document_graph(
                     labels = ["Concept"]
                 elif node_props.get("type") == "entity":
                     labels = ["Entity"]
+                # GraphRAG 新增类型
+                elif node_props.get("summary") and node_props.get("keywords"):
+                    labels = ["Theme"]
+                elif node_props.get("text") and node_props.get("confidence") is not None:
+                    labels = ["Claim"]
                 else:
                     labels = ["Concept"]
             
@@ -500,8 +507,24 @@ async def get_document_graph(
     edges: List[Dict[str, Any]] = []
     edge_id_set: set = set()
     
-    # Get edges related to the document (both endpoints must be related to the document)
+    # Get edges - query all edges between nodes in node_id_set
     if node_id_set:
+        node_id_list = list(node_id_set)
+        
+        # 使用更简单直接的边查询：先找到Document，然后获取它和所有相关节点之间的边
+        edge_query = f"""
+        MATCH (d:Document {{id: $doc_id}})
+        OPTIONAL MATCH (d)-[*1..{depth}]-(n)
+        WHERE NOT (n:Document) OR n.id = $doc_id
+        WITH d, COLLECT(DISTINCT n) AS related_nodes
+        WITH [d] + related_nodes AS all_nodes
+        UNWIND all_nodes AS source
+        WITH source, all_nodes
+        MATCH (source)-[r]->(target)
+        WHERE target IN all_nodes AND source <> target
+        RETURN DISTINCT source AS n, r, target AS m
+        LIMIT {edge_limit}
+        """
         edge_results = neo4j_client.execute_query(edge_query, {"doc_id": document_id})
         
         for record in edge_results:
@@ -512,20 +535,23 @@ async def get_document_graph(
                 
                 if source_node and target_node:
                     source_props = dict(source_node) if isinstance(source_node, dict) else source_node
+                    source_props = neo4j_client._convert_neo4j_types(source_props)
                     source_id = source_props.get("id") or source_props.get("name")
                     if not source_id:
                         source_id = getattr(source_node, "element_id", None) or str(id(source_node))
                     source_id = str(source_id)
                     
                     target_props = dict(target_node) if isinstance(target_node, dict) else target_node
+                    target_props = neo4j_client._convert_neo4j_types(target_props)
                     target_id = target_props.get("id") or target_props.get("name")
                     if not target_id:
                         target_id = getattr(target_node, "element_id", None) or str(id(target_node))
                     target_id = str(target_id)
                     
+                    rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
+                    
                     # Only add edges where both endpoints are in our selected nodes
                     if source_id in node_id_set and target_id in node_id_set:
-                        rel_type = rel.type if hasattr(rel, "type") else "RELATES_TO"
                         edge_unique_id = f"{source_id}_{rel_type}_{target_id}"
                         
                         # Avoid duplicate edges
@@ -543,13 +569,12 @@ async def get_document_graph(
                                 "properties": rel_props
                             })
                             
+                            # Update degree counts
                             if source_id in nodes_dict:
                                 nodes_dict[source_id]["degree"] += 1
                             if target_id in nodes_dict:
                                 nodes_dict[target_id]["degree"] += 1
 
-    
-    # 标记文档状态为已处理（即在图中可见）
     try:
         neo4j_client.mark_document_processed(document_id, "completed")
     except Exception:

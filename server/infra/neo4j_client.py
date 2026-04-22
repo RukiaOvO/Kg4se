@@ -292,9 +292,13 @@ class Neo4jClient:
         if obj is None:
             return None
         
-        # Handle Neo4j Node objects - convert to dict of properties
+        # Handle Neo4j Node objects - convert to dict of properties BUT preserve labels
         if isinstance(obj, Node):
-            return Neo4jClient._convert_neo4j_types(dict(obj))
+            # dict(obj) only returns properties, we need to also preserve labels
+            properties = Neo4jClient._convert_neo4j_types(dict(obj))
+            # Store labels in a special key so they're not lost during conversion
+            properties['_labels'] = list(obj.labels)
+            return properties
         
         # Handle Neo4j Relationship objects - convert to dict of properties
         if isinstance(obj, Relationship):

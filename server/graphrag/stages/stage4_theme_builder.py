@@ -143,8 +143,8 @@ class ThemeBuilder:
                     }}
                 }},
                 {{
-                    nodeQuery: 'MATCH (c:Concept) WHERE EXISTS {{ MATCH (c)-[:RELATED_TO]-(:Concept) }} RETURN id(c) AS id',
-                    relationshipQuery: 'MATCH (c1:Concept)-[r:RELATED_TO]-(c2:Concept) WHERE r.weight IS NOT NULL RETURN id(c1) AS source, id(c2) AS target, r.weight AS weight',
+                    nodeQuery: 'MATCH (c:Concept) WHERE EXISTS {{ MATCH (c)-[:RELATED_TO]-(:Concept) }} RETURN elementId(c) AS id',
+                    relationshipQuery: 'MATCH (c1:Concept)-[r:RELATED_TO]-(c2:Concept) WHERE r.weight IS NOT NULL RETURN elementId(c1) AS source, elementId(c2) AS target, r.weight AS weight',
                     relationshipProperties: {{
                         weight: {{
                             property: 'weight',
@@ -521,8 +521,8 @@ class ThemeBuilder:
             if all_node_ids:
                 concept_query = """
                 MATCH (c:Concept)
-                WHERE id(c) IN $node_ids
-                RETURN id(c) AS node_id, c.name AS name
+                WHERE elementId(c) IN $node_ids
+                RETURN elementId(c) AS node_id, c.name AS name
                 """
                 concept_results = neo4j_client.execute_query(concept_query, {"node_ids": all_node_ids})
                 
@@ -757,8 +757,8 @@ class ThemeBuilder:
             if all_node_ids:
                 concept_query = """
                 MATCH (c:Concept)
-                WHERE id(c) IN $node_ids
-                RETURN id(c) AS node_id, c.name AS name
+                WHERE elementId(c) IN $node_ids
+                RETURN elementId(c) AS node_id, c.name AS name
                 """
                 concept_results = neo4j_client.execute_query(concept_query, {"node_ids": all_node_ids})
                 
@@ -844,7 +844,7 @@ class ThemeBuilder:
                     
                     concept_query = """
                     MATCH (c:Concept)
-                    WHERE id(c) = $node_id
+                    WHERE elementId(c) = $node_id
                     RETURN c.name AS name
                     """
                     concept_results = neo4j_client.execute_query(concept_query, {"node_id": node_id})
@@ -910,7 +910,7 @@ class ThemeBuilder:
             node_id_query = """
             MATCH (c:Concept)
             WHERE c.name IN $member_names
-            RETURN id(c) AS id
+            RETURN elementId(c) AS id
             """
             node_results = neo4j_client.execute_query(
                 node_id_query,
@@ -922,18 +922,24 @@ class ThemeBuilder:
                 logger.warning("Level 2 子图投影：未找到节点")
                 return {}
             
-            # 创建子图投影（使用节点 ID 列表）
-            # 注意：GDS graph.project.cypher 不支持参数，需要构建查询字符串
-            # 但为了安全，我们使用节点 ID 而不是名称
-            node_ids_str = str(node_ids)
-            
+            # 创建子图投影（使用 gds.graph.project 直接投影，避免 id() 弃用警告）
             create_subgraph_query = f"""
+            MATCH (c:Concept)
+            WHERE elementId(c) IN {node_ids_str}
+            WITH collect(c) AS nodes
+            UNWIND nodes AS n
+            CALL {{
+                WITH n
+                MATCH (n)-[r:RELATED_TO]-(m:Concept)
+                WHERE elementId(m) IN {node_ids_str}
+                RETURN r, m
+            }}
+            WITH collect(DISTINCT n) AS final_nodes, collect(DISTINCT r) AS rels
             CALL gds.graph.project.cypher(
                 '{subgraph_name}',
-                'MATCH (c:Concept) WHERE id(c) IN {node_ids_str} RETURN id(c) AS id',
-                'MATCH (c1:Concept)-[r:RELATED_TO]-(c2:Concept)
-                 WHERE id(c1) IN {node_ids_str} AND id(c2) IN {node_ids_str}
-                 RETURN id(c1) AS source, id(c2) AS target, COALESCE(r.weight, 1.0) AS weight'
+                'UNWIND $nodes AS id MATCH (c) WHERE elementId(c) = id RETURN elementId(c) AS id',
+                'UNWIND $rels AS id MATCH ()-[r]->() WHERE elementId(r) = id RETURN elementId(startNode(r)) AS source, elementId(endNode(r)) AS target, COALESCE(r.weight, 1.0) AS weight',
+                {{parameters: {{nodes: [x IN final_nodes | elementId(x)], rels: [r IN rels | elementId(r)]}}}}
             )
             YIELD graphName, nodeCount, relationshipCount
             RETURN graphName, nodeCount, relationshipCount
@@ -974,8 +980,8 @@ class ThemeBuilder:
             if all_node_ids:
                 concept_query = """
                 MATCH (c:Concept)
-                WHERE id(c) IN $node_ids AND c.name IN $member_names
-                RETURN id(c) AS node_id, c.name AS name
+                WHERE elementId(c) IN $node_ids AND c.name IN $member_names
+                RETURN elementId(c) AS node_id, c.name AS name
                 """
                 concept_results = neo4j_client.execute_query(
                     concept_query,

@@ -180,6 +180,14 @@
               <span>实体 (Entity)</span>
             </div>
             <div class="legend-item">
+              <div class="legend-color" style="background: #9333ea"></div>
+              <span>文本块 (Chunk)</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: #ec4899"></div>
+              <span>声明 (Claim)</span>
+            </div>
+            <div class="legend-item">
               <div class="legend-color" style="background: #18a058"></div>
               <span>其他 (Other)</span>
             </div>
@@ -532,76 +540,58 @@ const loadGraph = async () => {
           return !isSystemNode
         })
         .map((node: any) => {
-          // Extract labels and determine primary type
+          // 直接使用后端提供的 node.type 字段
+          let nodeType = node.type
+          
           // Handle different label formats: array, string, or undefined
           let nodeLabels = node.labels || []
           if (typeof nodeLabels === 'string') {
             nodeLabels = [nodeLabels]
           }
-          const nodeType = node.type || (nodeLabels.length > 0 ? nodeLabels[0] : 'Unknown')
           
-          // Also check properties for document type hints
-          const hasFilename = !!node.properties?.filename
-          const hasDocType = node.properties?.kind === 'pdf' || 
-                           node.properties?.kind === 'docx' ||
-                           node.properties?.kind === 'md'
-          
-          // Determine node class for styling
-          // Prioritize known types: Concept, Document, Entity
-          let nodeClass = 'Unknown'
-          
-          // 增强类型识别：收集所有可能的类型提示
-          const typeLower = (nodeType || '').toLowerCase()
-          const allHints = [
-            nodeType, 
-            ...nodeLabels, 
-            node.label, 
-            node.properties?.name,
-            node.properties?.type
-          ].filter(Boolean).map(h => String(h).toLowerCase())
-          
-          const hasConceptHint = allHints.some(h => h.includes('concept'))
-          const hasEntityHint = allHints.some(h => h.includes('entity'))
-          const hasDocumentHint = allHints.some(h => h.includes('document'))
-          
-          // 优先级：Concept > Document > Entity > Unknown
-          if (hasConceptHint || typeLower === 'concept') {
-            nodeClass = 'Concept'
-          } else if (hasDocumentHint || typeLower === 'document' || hasFilename || hasDocType) {
-            nodeClass = 'Document'
-          } else if (hasEntityHint || typeLower === 'entity') {
-            nodeClass = 'Entity'
-          } else {
-            // 如果都不匹配，尝试从 properties.type 获取类型
-            const propType = (node.properties?.type || '').toLowerCase()
-            if (propType.includes('concept')) {
-              nodeClass = 'Concept'
-            } else if (propType.includes('entity')) {
-              nodeClass = 'Entity'
-            } else if (propType.includes('document')) {
-              nodeClass = 'Document'
-            }
+          // 如果 type 缺失，从 labels 中获取
+          if (!nodeType && nodeLabels.length > 0) {
+            nodeType = nodeLabels[0]
           }
+          
+          // 标准化类型名称（首字母大写）
+          if (nodeType) {
+            const normalizedType = nodeType.toLowerCase()
+            nodeType = normalizedType.charAt(0).toUpperCase() + normalizedType.slice(1)
+          } else {
+            nodeType = 'Unknown'
+          }
+          
+          // 确定节点显示的label
+          let nodeLabel = node.label || node.properties?.name || node.properties?.filename || node.id
+          
+          // Claim节点优先使用text属性
+          if (nodeType === 'Claim' && node.properties?.text) {
+            nodeLabel = node.properties.text.length > 50 
+              ? node.properties.text.substring(0, 50) + '...' 
+              : node.properties.text
+          }
+          
+          // 关键修复：确保 type 字段不被 properties 覆盖
+          const { type: _propType, ...propertiesWithoutType } = node.properties || {}
           
           return {
             data: {
               id: node.id,
-              label: node.label || node.properties?.name || node.properties?.filename || node.id,
-              type: nodeClass,
+              label: nodeLabel,
+              type: nodeType,
               degree: node.degree || 0,
-              ...node.properties
+              ...propertiesWithoutType
             },
-            classes: nodeClass
+            classes: nodeType
           }
         })
       
       // Transform backend Edge format to Cytoscape format
-      // First get valid node IDs after filtering
       const validNodeIds = new Set(nodes.map((n: any) => n.data.id))
       
       edges = result.edges
         .filter((edge: any) => {
-          // Filter out edges connected to filtered nodes
           const sourceValid = validNodeIds.has(edge.source)
           const targetValid = validNodeIds.has(edge.target)
           return sourceValid && targetValid
@@ -616,6 +606,9 @@ const loadGraph = async () => {
             ...edge.properties
           }
         }))
+
+      console.log('[Frontend] 过滤后边的数量:', edges.length)
+      console.log('[Frontend] 最终节点数:', nodes.length, '最终边数:', edges.length)
 
       // Keep all filtered nodes, edges already filtered to only connect valid nodes
       
@@ -773,6 +766,18 @@ const renderGraph = () => {
         selector: 'node.Entity',
         style: {
           'background-color': '#f0a020'
+        }
+      },
+      {
+        selector: 'node.Chunk',
+        style: {
+          'background-color': '#9333ea'
+        }
+      },
+      {
+        selector: 'node.Claim',
+        style: {
+          'background-color': '#ec4899'
         }
       },
       {

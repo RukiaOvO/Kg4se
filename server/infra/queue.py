@@ -1,10 +1,23 @@
 """Redis Queue (RQ) configuration and utilities."""
 import redis
-from rq import Queue, Connection, Worker
-from rq.job import Job
-from rq import get_current_job
+import os
 from typing import Optional, Dict, Any, List
-from infra.config import settings
+
+# Windows 不支持 os.fork()，RQ Worker 无法工作，使用优雅降级
+IS_WINDOWS = os.name == 'nt'
+
+if not IS_WINDOWS:
+    from rq import Queue, Connection, Worker
+    from rq.job import Job
+    from rq import get_current_job
+    RQ_AVAILABLE = True
+else:
+    RQ_AVAILABLE = False
+    Queue = None
+    Connection = None
+    Worker = None
+    Job = None
+    get_current_job = None
 
 
 class RedisQueue:
@@ -17,7 +30,16 @@ class RedisQueue:
         Args:
             redis_url: Redis connection URL (defaults to settings.redis_url)
         """
+        from infra.config import settings
         self.redis_url = redis_url or settings.redis_url
+        
+        # Windows 系统不支持 RQ，直接使用内存存储
+        if IS_WINDOWS:
+            print("[WARN] Windows system does not support RQ (os.fork), using in-memory task queue")
+            self._connected = False
+            self.redis_conn = None
+            self.queue = None
+            return
         
         try:
             # Parse Redis URL
@@ -73,7 +95,7 @@ class RedisQueue:
         Returns:
             Job instance or None
         """
-        if not self._connected:
+        if not self._connected or Job is None:
             return None
         
         try:
@@ -274,6 +296,8 @@ def update_job_progress(progress: int, message: str, **kwargs):
         message: Status message
         **kwargs: Additional metadata to store
     """
+    if get_current_job is None:
+        return
     job = get_current_job()
     if job:
         meta = job.meta or {}
@@ -284,4 +308,3 @@ def update_job_progress(progress: int, message: str, **kwargs):
         })
         job.meta = meta
         job.save()
-
