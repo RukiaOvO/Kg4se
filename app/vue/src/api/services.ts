@@ -98,7 +98,7 @@ export interface Settings extends AISettings {
 
 // Dashboard
 export const getDashboardStats = (): Promise<DashboardStats> => 
-  api.get('/graph/stats')
+  api.get('/graph/stats', { params: { _: Date.now() } })
 
 // Upload - 统一使用 /uploads/process 接口，自动处理
 export const uploadFile = (

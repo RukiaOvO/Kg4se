@@ -617,16 +617,7 @@ const loadGraph = async () => {
           }
         }))
 
-      // Filter isolated nodes (always enabled)
-      if (edges.length > 0) {
-        const connectedNodeIds = new Set<string>()
-        edges.forEach((edge: any) => {
-          connectedNodeIds.add(edge.data.source)
-          connectedNodeIds.add(edge.data.target)
-        })
-        
-        nodes = nodes.filter((node: any) => connectedNodeIds.has(node.data.id))
-      }
+      // Keep all filtered nodes, edges already filtered to only connect valid nodes
       
       // Re-process edges to ensure they only connect valid nodes
       const finalNodeIds = new Set(nodes.map((n: any) => n.data.id))
