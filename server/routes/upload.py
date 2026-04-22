@@ -254,12 +254,20 @@ async def list_documents(
     total = total_result[0]["total"] if total_result else 0
     
     # 获取统计数据（不应用筛选条件）
+    # 使用与文档列表一致的逻辑：如果 processing_status 为空，则根据 chunk_count/claim_count 推断
+    # 同时将 processing, failed, cancelled 状态归类到待处理中
     stats_query = """
     MATCH (d:Document)
     RETURN 
         count(d) as total,
-        count(CASE WHEN d.processing_status = 'completed' THEN d END) as completed,
-        count(CASE WHEN d.processing_status IN ['uploaded', 'pending'] THEN d END) as pending
+        count(CASE 
+            WHEN d.processing_status = 'completed' THEN d 
+            WHEN d.processing_status IS NULL AND (coalesce(d.chunk_count, 0) > 0 OR coalesce(d.claim_count, 0) > 0) THEN d 
+            END) as completed,
+        count(CASE 
+            WHEN d.processing_status IN ['uploaded', 'pending', 'processing', 'failed', 'cancelled'] THEN d 
+            WHEN d.processing_status IS NULL AND coalesce(d.chunk_count, 0) = 0 AND coalesce(d.claim_count, 0) = 0 THEN d 
+            END) as pending
     """
     stats_result = neo4j_client.execute_query(stats_query)
     stats = stats_result[0] if stats_result else {"total": 0, "completed": 0, "pending": 0}
@@ -295,20 +303,25 @@ async def list_documents(
     
     documents = []
     for row in results:
-        # 检查文档的处理状态（通过是否有关联节点）
+        # 检查文档的处理状态（通过是否有统计数据）
         chunk_count = row.get("chunk_count", 0) or 0
-        rel_count = row.get("rel_count", 0) or 0
+        claim_count = row.get("claim_count", 0) or 0
         persisted_status = row.get("processing_status") or ""
-        processing_status = persisted_status or ("completed" if chunk_count > 0 or rel_count > 0 else "uploaded")
+        processing_status = persisted_status or ("completed" if chunk_count > 0 or claim_count > 0 else "uploaded")
+        
+        doc_id = row.get("id")
+        # 过滤掉没有ID的无效文档数据
+        if not doc_id:
+            continue
         
         documents.append({
-            "id": row.get("id"),
-            "filename": row.get("filename"),
-            "kind": row.get("kind"),
-            "size": row.get("size"),
+            "id": doc_id,
+            "filename": row.get("filename") or "未命名文档",
+            "kind": row.get("kind") or "unknown",
+            "size": row.get("size") or 0,
             "created_at": row.get("created_at"),
             "updated_at": row.get("updated_at"),
-            "checksum": row.get("checksum"),
+            "checksum": row.get("checksum") or "",
             "chunk_count": chunk_count,
             "concept_count": row.get("concept_count", 0) or 0,
             "claim_count": row.get("claim_count", 0) or 0,
@@ -631,11 +644,72 @@ def process_document_background(
         print(f"   - 文件路径: {file_path}")
         print(f"   - 文件类型: {kind}")
         print(f"   - 任务ID: {job_id}")
-        print(f"   - Chunk大小: {chunk_size} 字符")
         print(f"   - AI智能分词: 启用")
         if user_prompt:
             print(f"   - 用户Prompt: {user_prompt[:100]}...")
         print(f"{'#'*80}\n")
+        
+        # 检查任务是否已取消
+        if _is_job_cancelled(job_id):
+            print(f"❌ [任务取消] 任务已被用户取消")
+            _update_upload_status(job_id, "cancelled", 0, "任务已被用户取消", documentId=doc_id)
+            return
+        
+        # 优先使用 GraphRAG Pipeline（如果可用）
+        if graphrag_pipeline_service.is_available():
+            print(f"\n🧠 [GraphRAG模式] 使用 Neo4j GraphRAG SimpleKGPipeline")
+            
+            _update_upload_status(job_id, "processing", 25, "正在进行GraphRAG处理...", documentId=doc_id)
+            
+            import asyncio
+            from asyncio import TimeoutError
+            logger = __import__('logging').getLogger('routes.upload')
+            
+            try:
+                # 在后台线程中创建新的事件循环（避免 "no current event loop" 错误）
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                stats = loop.run_until_complete(asyncio.wait_for(
+                    graphrag_pipeline_service.process_document(
+                        file_path=file_path,
+                        doc_id=doc_id,
+                        root_topic=root_topic,
+                        user_prompt=user_prompt,
+                        timeout=300
+                    ),
+                    timeout=320  # 比内部超时多20秒，处理网络延迟
+                ))
+                loop.close()
+                
+                print(f"\n🎉 [GraphRAG处理完成]")
+                print(f"   - 文本块数: {stats.get('chunks', 0)}")
+                print(f"   - 实体数: {stats.get('entities', 0)}")
+                print(f"   - 关系数: {stats.get('relationships', 0)}")
+                print(f"   - 向量数: {stats.get('vectors_generated', 0)}")
+                if stats.get('themes'):
+                    print(f"   - 主题: {', '.join(stats['themes'][:3])}...")
+                
+                result_data = {"stats": stats}
+                if stats.get('themes'):
+                    result_data["insights"] = stats['themes'][:5]
+                
+                _update_upload_status(job_id, "completed", 100, "GraphRAG处理完成！", documentId=doc_id, **result_data)
+                logger.info(f"GraphRAG pipeline completed successfully for doc_id: {doc_id}")
+                return
+            
+            except TimeoutError:
+                error_msg = f"GraphRAG Pipeline处理超时"
+                print(f"⏰ {error_msg}")
+                logger.error(error_msg)
+                _update_upload_status(job_id, "failed", 50, error_msg, documentId=doc_id)
+                return
+            except Exception as e:
+                error_msg = f"GraphRAG Pipeline执行失败，回退到传统模式: {str(e)}"
+                print(f"⚠️  {error_msg}")
+                logger.warning(error_msg)
+        
+        # 传统处理模式（回退方案）
+        print(f"\n🤖 [传统模式] 使用传统处理流程")
         
         # Step 1: Parse document
         _update_upload_status(job_id, "processing", 10, "正在解析文档...", documentId=doc_id)
@@ -686,6 +760,12 @@ def process_document_background(
             all_insights = []
             
             for i, chunk in enumerate(chunks, 1):
+                # 检查任务是否已取消
+                if _is_job_cancelled(job_id):
+                    print(f"❌ [任务取消] 任务已被用户取消")
+                    _update_upload_status(job_id, "cancelled", progress, "任务已被用户取消", documentId=doc_id)
+                    return
+                
                 print(f"\n📦 [文本块 {i}/{len(chunks)}] AI深度分析中...")
                 knowledge = ai_segmenter.extract_rich_knowledge(chunk, doc_context, final_prompt)
                 
@@ -798,6 +878,12 @@ def process_document_background(
             chunk_triplet_counts = []
             
             for i, chunk in enumerate(chunks, 1):
+                # 检查任务是否已取消
+                if _is_job_cancelled(job_id):
+                    print(f"❌ [任务取消] 任务已被用户取消")
+                    _update_upload_status(job_id, "cancelled", progress, "任务已被用户取消", documentId=doc_id)
+                    return
+                
                 print(f"\n📦 [文本块 {i}/{len(chunks)}] 处理中...")
                 triplets = extractor.extract(chunk)
                 all_triplets.extend(triplets)
@@ -1478,4 +1564,52 @@ async def upload_url(
         response["message"] = "网页内容已抓取，正在后台处理..."
     
     return response
+
+
+@router.delete("/cancel/{job_id}")
+async def cancel_upload_job(job_id: str):
+    """
+    Cancel a running upload processing job.
+    
+    Args:
+        job_id: Job ID to cancel
+        
+    Returns:
+        Success message or error
+    """
+    # Try to cancel via RQ if available
+    if queue.is_connected():
+        success = queue.cancel_job(job_id)
+        if success:
+            # Update in-memory status if exists
+            if job_id in processing_jobs:
+                processing_jobs[job_id].update({
+                    "status": "cancelled",
+                    "message": "任务已被用户取消"
+                })
+            return {"message": "Job cancelled successfully", "jobId": job_id}
+    
+    # Fallback: mark job as cancelled in in-memory storage
+    processing_jobs[job_id] = {
+        "status": "cancelled",
+        "message": "任务已被用户取消",
+        "progress": 0
+    }
+    
+    return {"message": "Job cancelled successfully", "jobId": job_id}
+
+
+def _is_job_cancelled(job_id: str) -> bool:
+    """Check if job has been cancelled."""
+    # Check in-memory storage
+    if job_id in processing_jobs:
+        return processing_jobs[job_id].get("status") == "cancelled"
+    
+    # Check Redis queue metadata
+    if queue.is_connected():
+        status = queue.get_job_status(job_id)
+        if status.get("status") == "cancelled":
+            return True
+    
+    return False
 

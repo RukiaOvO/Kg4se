@@ -3,8 +3,8 @@
     <!-- Page Header -->
     <div class="page-header">
       <div class="header-content">
-        <h1 class="page-title">文档管理</h1>
-        <p class="page-subtitle">查看和管理已上传的文档</p>
+        <h1 class="page-title">{{ t('documents.title') }}</h1>
+        <p class="page-subtitle">{{ t('documents.subtitle') }}</p>
       </div>
     </div>
 
@@ -17,7 +17,7 @@
             <n-icon size="32"><document-text-outline /></n-icon>
           </div>
           <div class="stat-content">
-            <div class="stat-label">总文档数</div>
+            <div class="stat-label">{{ t('documents.total_documents') }}</div>
             <div class="stat-value">{{ totalDocuments }}</div>
           </div>
         </div>
@@ -27,7 +27,7 @@
             <n-icon size="32"><checkmark-circle-outline /></n-icon>
           </div>
           <div class="stat-content">
-            <div class="stat-label">已处理</div>
+            <div class="stat-label">{{ t('documents.processed') }}</div>
             <div class="stat-value">{{ completedDocuments }}</div>
           </div>
         </div>
@@ -37,7 +37,7 @@
             <n-icon size="32"><hourglass-outline /></n-icon>
           </div>
           <div class="stat-content">
-            <div class="stat-label">待处理</div>
+            <div class="stat-label">{{ t('documents.to_process') }}</div>
             <div class="stat-value">{{ pendingDocuments }}</div>
           </div>
         </div>
@@ -48,7 +48,7 @@
         <template #header>
           <div class="card-header">
             <div class="header-left">
-              <h2>所有文档</h2>
+              <h2>{{ t('documents.all_documents') }}</h2>
               <n-space>
                 <n-button
                   v-if="selectedDocs.length > 0"
@@ -60,16 +60,16 @@
                   <template #icon>
                     <n-icon size="14"><trash-outline /></n-icon>
                   </template>
-                  批量删除 ({{ selectedDocs.length }})
+                  {{ t('documents.batch_delete', { count: selectedDocs.length }) }}
                 </n-button>
                 <!-- 状态筛选 -->
                 <n-select
                   v-model:value="filterStatus"
                   :options="[
-                    { label: '全部状态', value: 'all' },
-                    { label: '已完成', value: 'completed' },
-                    { label: '待处理', value: 'pending' },
-                    { label: '处理中', value: 'processing' }
+                    { label: t('documents.all_status'), value: 'all' },
+                    { label: t('documents.completed'), value: 'completed' },
+                    { label: t('documents.pending'), value: 'pending' },
+                    { label: t('documents.processing'), value: 'processing' }
                   ]"
                   style="width: 120px"
                   @update:value="loadDocuments"
@@ -79,14 +79,14 @@
                 <n-select
                   v-model:value="filterType"
                   :options="[
-                    { label: '全部类型', value: 'all' },
-                    { label: 'PDF', value: 'pdf' },
-                    { label: 'Markdown', value: 'md' },
-                    { label: '文本', value: 'txt' },
-                    { label: 'Word', value: 'word' },
-                    { label: 'Json', value: 'json'},
-                    { label: 'Csv', value: 'csv'},
-                    { label: 'Excel', value: 'xlsx'}
+                    { label: t('documents.all_types'), value: 'all' },
+                    { label: t('documents.pdf'), value: 'pdf' },
+                    { label: t('documents.markdown'), value: 'md' },
+                    { label: t('documents.txt'), value: 'txt' },
+                    { label: t('documents.word'), value: 'word' },
+                    { label: t('documents.json'), value: 'json'},
+                    { label: t('documents.csv'), value: 'csv'},
+                    { label: t('documents.excel'), value: 'xlsx'}
                   ]"
                   style="width: 120px"
                   @update:value="loadDocuments"
@@ -98,7 +98,7 @@
               <!-- 搜索框 -->
               <n-input
                 v-model:value="searchKeyword"
-                placeholder="搜索文件名..."
+                :placeholder="t('documents.search_filename')"
                 clearable
                 style="width: 200px"
                 @keyup.enter="handleSearch"
@@ -113,9 +113,9 @@
               <n-select
                 v-model:value="sortBy"
                 :options="[
-                  { label: '最新上传', value: 'created_at' },
-                  { label: '文件名', value: 'filename' },
-                  { label: '文件大小', value: 'size' }
+                  { label: t('documents.latest_upload'), value: 'created_at' },
+                  { label: t('documents.filename'), value: 'filename' },
+                  { label: t('documents.file_size'), value: 'size' }
                 ]"
                 style="width: 120px"
                 @update:value="loadDocuments"
@@ -126,7 +126,7 @@
                 <template #icon>
                   <n-icon><refresh-outline /></n-icon>
                 </template>
-                刷新
+                {{ t('documents.refresh') }}
               </n-button>
             </div>
           </div>
@@ -163,26 +163,26 @@
     <!-- Document Detail Modal -->
     <n-modal
       v-model:show="showDetailModal"
-      :title="`文档详情 - ${selectedDocument?.filename || ''}`"
+      :title="`${t('documents.document_detail')} - ${selectedDocument?.filename || ''}`"
       positive-text=""
-      negative-text="关闭"
+      :negative-text="t('common.close')"
       :mask-closable="false"
       preset="dialog"
       style="width: 80%; max-width: 1000px"
     >
       <div v-if="selectedDocument && documentDetail" class="document-detail">
         <!-- Basic Info -->
-        <n-divider>基本信息</n-divider>
+        <n-divider>{{ t('documents.basic_info') }}</n-divider>
         <n-grid :cols="2" :x-gap="24" :y-gap="12">
           <n-gi>
             <div class="info-item">
-              <span class="label">文件名:</span>
+              <span class="label">{{ t('documents.filename') }}:</span>
               <span class="value">{{ documentDetail.filename }}</span>
             </div>
           </n-gi>
           <n-gi>
             <div class="info-item">
-              <span class="label">文件类型:</span>
+              <span class="label">{{ t('documents.file_type') }}:</span>
               <n-tag :type="getKindColor(documentDetail.kind)">
                 {{ documentDetail.kind.toUpperCase() }}
               </n-tag>
@@ -190,41 +190,41 @@
           </n-gi>
           <n-gi>
             <div class="info-item">
-              <span class="label">文件大小:</span>
+              <span class="label">{{ t('documents.size') }}:</span>
               <span class="value">{{ formatFileSize(documentDetail.size) }}</span>
             </div>
           </n-gi>
           <n-gi>
             <div class="info-item">
-              <span class="label">处理状态:</span>
+              <span class="label">{{ t('documents.processing_status') }}:</span>
               <n-tag
                 :type="documentDetail.processing_status === 'completed' ? 'success' : 'warning'"
               >
-                {{ documentDetail.processing_status === 'completed' ? '已完成' : '待处理' }}
+                {{ documentDetail.processing_status === 'completed' ? t('documents.completed') : t('documents.pending') }}
               </n-tag>
             </div>
           </n-gi>
           <n-gi>
             <div class="info-item">
-              <span class="label">上传时间:</span>
+              <span class="label">{{ t('documents.upload_time') }}:</span>
               <span class="value">{{ formatTime(documentDetail.created_at) }}</span>
             </div>
           </n-gi>
           <n-gi>
             <div class="info-item">
-              <span class="label">更新时间:</span>
+              <span class="label">{{ t('documents.update_time') }}:</span>
               <span class="value">{{ formatTime(documentDetail.updated_at) }}</span>
             </div>
           </n-gi>
           <n-gi>
             <div class="info-item">
-              <span class="label">MIME 类型:</span>
+              <span class="label">{{ t('documents.mime_type') }}:</span>
               <span class="value">{{ documentDetail.mime }}</span>
             </div>
           </n-gi>
           <n-gi>
             <div class="info-item">
-              <span class="label">Checksum:</span>
+              <span class="label">{{ t('documents.checksum') }}:</span>
               <span class="value" style="font-family: monospace; font-size: 12px;">
                 {{ documentDetail.checksum.substring(0, 16) }}...
               </span>
@@ -233,36 +233,36 @@
         </n-grid>
 
         <!-- Statistics -->
-        <n-divider>处理统计</n-divider>
+        <n-divider>{{ t('documents.statistics') }}</n-divider>
         <n-grid :cols="4" :x-gap="16" :y-gap="12">
           <n-gi>
             <div class="stat-box">
               <div class="stat-value">{{ documentDetail.statistics.chunk_count }}</div>
-              <div class="stat-label">文本块</div>
+              <div class="stat-label">{{ t('documents.chunk_count') }}</div>
             </div>
           </n-gi>
           <n-gi>
             <div class="stat-box">
               <div class="stat-value">{{ documentDetail.statistics.concept_count }}</div>
-              <div class="stat-label">概念节点</div>
+              <div class="stat-label">{{ t('documents.concept_count') }}</div>
             </div>
           </n-gi>
           <n-gi>
             <div class="stat-box">
               <div class="stat-value">{{ documentDetail.statistics.claim_count }}</div>
-              <div class="stat-label">论断</div>
+              <div class="stat-label">{{ t('documents.claim_count') }}</div>
             </div>
           </n-gi>
           <n-gi>
             <div class="stat-box">
               <div class="stat-value">{{ documentDetail.statistics.relation_count }}</div>
-              <div class="stat-label">关系</div>
+              <div class="stat-label">{{ t('documents.relation_count') }}</div>
             </div>
           </n-gi>
         </n-grid>
 
         <!-- Themes -->
-        <n-divider v-if="documentDetail.themes.length > 0">关联主题</n-divider>
+        <n-divider v-if="documentDetail.themes.length > 0">{{ t('documents.related_themes') }}</n-divider>
         <div v-if="documentDetail.themes.length > 0">
           <n-space vertical :size="12">
             <div v-for="theme in documentDetail.themes" :key="theme.id" class="theme-item">
@@ -272,17 +272,17 @@
                     Level {{ theme.level }}
                   </n-tag>
                   <h4 style="margin: 0 16px; flex: 1;">{{ theme.label }}</h4>
-                  <span style="color: #999; font-size: 14px;">{{ theme.member_count }} 成员</span>
+                  <span style="color: #999; font-size: 14px;">{{ theme.member_count }} {{ t('documents.members') }}</span>
                 </div>
                 <p class="theme-summary">{{ theme.summary }}</p>
               </n-card>
             </div>
           </n-space>
         </div>
-        <div v-else class="empty-message">暂无关联主题</div>
+        <div v-else class="empty-message">{{ t('documents.no_themes') }}</div>
 
         <!-- Metadata -->
-        <n-divider v-if="Object.keys(documentDetail.meta).length > 0">元数据</n-divider>
+        <n-divider v-if="Object.keys(documentDetail.meta).length > 0">{{ t('documents.metadata') }}</n-divider>
         <div v-if="Object.keys(documentDetail.meta).length > 0">
           <n-code
             :code="JSON.stringify(documentDetail.meta, null, 2)"
@@ -291,11 +291,11 @@
           />
         </div>
 
-        <n-divider>文档预览</n-divider>
+        <n-divider>{{ t('documents.document_preview') }}</n-divider>
         <div v-if="canPreview" class="preview-container">
-          <iframe :src="previewUrl" class="preview-frame" title="文档预览" />
+          <iframe :src="previewUrl" class="preview-frame" :title="t('documents.document_preview')" />
         </div>
-        <div v-else class="empty-message">当前文件类型暂不支持在线预览，请下载后查看。</div>
+        <div v-else class="empty-message">{{ t('documents.no_preview') }}</div>
       </div>
     </n-modal>
   </div>
@@ -305,6 +305,7 @@
 import { ref, computed, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
+import { useI18n } from 'vue-i18n'
 import {
   NButton,
   NTag,
@@ -322,6 +323,7 @@ import { listDocuments, getDocumentDetail, getDocumentFileUrl, deleteDocument, t
 
 const router = useRouter()
 const message = useMessage()
+const { t } = useI18n()
 
 // 响应式变量
 const filterStatus = ref('all')
@@ -386,8 +388,8 @@ const loadDocuments = async () => {
     
     const result = await listDocuments(skip, pagination.value.pageSize, sortBy.value, status, kind, keyword)
 
-    // 更新文档列表
-    documents.value = result.documents
+    // 更新文档列表，过滤无效数据
+    documents.value = (result.documents || []).filter(doc => doc && doc.id)
     
     // 更新总数和分页
     totalCount.value = result.total
@@ -554,63 +556,63 @@ const columns = computed(() => [
     width: 40
   },
   {
-    title: '文件名',
+    title: t('documents.filename'),
     key: 'filename',
     width: 250,
     ellipsis: { tooltip: true },
     render: (row: any) => row.filename
   },
   {
-    title: '类型',
+    title: t('documents.type'),
     key: 'kind',
     width: 80,
     render: (row: any) => h(NTag, { type: getKindColor(row.kind) }, () => row.kind.toUpperCase())
   },
   {
-    title: '大小',
+    title: t('documents.size'),
     key: 'size',
     width: 100,
     render: (row: any) => formatFileSize(row.size)
   },
   {
-    title: '文本块',
+    title: t('documents.chunks'),
     key: 'chunk_count',
     width: 80,
     align: 'center' as const,
     render: (row: any) => h('span', { style: 'font-weight: bold; color: #3b82f6;' }, row.chunk_count)
   },
   {
-    title: '概念',
+    title: t('documents.concepts'),
     key: 'concept_count',
     width: 80,
     align: 'center' as const,
     render: (row: any) => h('span', { style: 'font-weight: bold; color: #10b981;' }, row.concept_count)
   },
   {
-    title: '论断',
+    title: t('documents.claims'),
     key: 'claim_count',
     width: 80,
     align: 'center' as const,
     render: (row: any) => h('span', { style: 'font-weight: bold; color: #f59e0b;' }, row.claim_count)
   },
   {
-    title: '状态',
+    title: t('documents.status'),
     key: 'processing_status',
     width: 100,
     render: (row: any) => {
       const type = row.processing_status === 'completed' ? 'success' : 'warning'
-      const label = row.processing_status === 'completed' ? '已完成' : '待处理'
+      const label = row.processing_status === 'completed' ? t('documents.completed') : t('documents.pending')
       return h(NTag, { type }, () => label)
     }
   },
   {
-    title: '上传时间',
+    title: t('documents.upload_time'),
     key: 'created_at',
     width: 180,
     render: (row: any) => formatTime(row.created_at)
   },
   {
-    title: '操作',
+    title: t('documents.actions'),
     key: 'actions',
     width: 200,
     fixed: 'right' as const,
@@ -624,7 +626,7 @@ const columns = computed(() => [
             text: true,
             onClick: () => handleViewDocument(row)
           },
-          { default: () => '查看' }
+          { default: () => t('documents.view') }
         ),
         h(
           NButton,
@@ -634,7 +636,7 @@ const columns = computed(() => [
             text: true,
             onClick: () => handleViewGraph(row)
           },
-          { default: () => '图谱' }
+          { default: () => t('documents.graph') }
         ),
         h(
           NButton,
@@ -644,7 +646,7 @@ const columns = computed(() => [
             text: true,
             onClick: () => handleDeleteDocument(row)
           },
-          { default: () => '删除' }
+          { default: () => t('documents.delete') }
         )
       ])
     }

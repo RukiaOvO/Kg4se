@@ -105,7 +105,7 @@ const menuOptions = computed(() => [
     key: '/knowledge'
   },
   {
-    label: '文档管理',
+    label: t('navigation.documents'),
     key: '/documents'
   },
   {

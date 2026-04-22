@@ -254,7 +254,7 @@ class OpenAICompatibleClient(BaseAIClient):
         
         # 根据是否是本地服务（Ollama）设置不同的超时时间
         is_local = 'localhost' in normalized_base_url or '127.0.0.1' in normalized_base_url
-        timeout = 120.0 if is_local else 30.0
+        timeout = 180.0 if is_local else 180.0  # 统一设置为 180 秒
         
         self.client = OpenAI(
             api_key=api_key,
@@ -268,6 +268,15 @@ class OpenAICompatibleClient(BaseAIClient):
         temperature: float = 0.3,
         **extra_params
     ) -> str:
+        import time
+        
+        # 记录请求日志
+        logger.info(f"📡 LLM Request - Model: {self.model}, Temperature: {temperature}")
+        logger.debug(f"📤 Messages: {json.dumps(messages, ensure_ascii=False, indent=2)}")
+        logger.debug(f"📤 Extra params: {extra_params}")
+        
+        start_time = time.time()
+        
         # 处理 json_mode 参数
         params = {k: v for k, v in extra_params.items() if k != "json_mode"}
         if extra_params.get("json_mode"):
@@ -280,8 +289,19 @@ class OpenAICompatibleClient(BaseAIClient):
                 temperature=temperature,
                 **params
             )
-            return response.choices[0].message.content
+            
+            # 记录响应日志
+            elapsed_time = time.time() - start_time
+            content = response.choices[0].message.content
+            logger.info(f"✅ LLM Response - Time: {elapsed_time:.2f}s, Content length: {len(content)} chars")
+            logger.debug(f"📥 Response: {content[:500]}..." if len(content) > 500 else f"📥 Response: {content}")
+            
+            return content
+            
         except Exception as e:
+            elapsed_time = time.time() - start_time
+            logger.error(f"❌ LLM Error - Time: {elapsed_time:.2f}s, Error: {type(e).__name__}: {e}")
+            
             # 提供更详细的错误信息
             error_msg = str(e)
             error_type = type(e).__name__
