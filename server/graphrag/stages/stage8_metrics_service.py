@@ -49,24 +49,26 @@ class MetricsService:
             "modularity": 0.0
         }
 
-        # 1) 节点计数和孤立节点比例（仅统计该文档节点子图）
+        # 1) 节点计数和孤立节点比例（通过 MENTIONS 关系查找该文档的概念节点）
+        # Concept 节点本身没有 doc_id，需要通过 MENTIONS 关系查找
         isolation_query = """
-        MATCH (n)
-        WHERE n.doc_id = $doc_id
-        OPTIONAL MATCH (n)-[r]-(m)
-        WHERE m.doc_id = $doc_id
-        WITH n, count(r) AS deg
+        MATCH (d:Document {id: $doc_id})-[:MENTIONS]-(c:Concept)
+        OPTIONAL MATCH (c)-[r]-(other)
+        WHERE (other:Concept) OR (other:Chunk)
+        WITH c, count(r) AS deg
         RETURN sum(CASE WHEN deg = 0 THEN 1 ELSE 0 END) AS isolated_nodes,
-               count(n) AS total_nodes
+               count(c) AS total_nodes
         """
         iso_result = self.neo4j_client.execute_query(isolation_query, {"doc_id": doc_id})
         isolated_nodes = iso_result[0].get("isolated_nodes", 0) if iso_result else 0
         total_nodes = iso_result[0].get("total_nodes", 0) if iso_result else 0
 
         # 2) 边数与平均度数（避免重复计数，使用 id 约束去重）
+        # 统计与该文档关联的所有概念节点之间的边
         degree_query = """
-        MATCH (n)-[r]-(m)
-        WHERE n.doc_id = $doc_id AND m.doc_id = $doc_id AND id(n) <= id(m)
+        MATCH (d:Document {id: $doc_id})-[:MENTIONS]-(c1:Concept)
+        MATCH (c1)-[r]-(c2:Concept)
+        WHERE id(c1) <= id(c2)
         RETURN count(r) AS edge_count
         """
         deg_result = self.neo4j_client.execute_query(degree_query, {"doc_id": doc_id})

@@ -2,6 +2,7 @@
 import uuid
 import hashlib
 import json
+import logging
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
@@ -16,12 +17,15 @@ from services.parser import ParserFactory
 from services.extractor import TripletExtractor
 from services.linker import EntityLinker
 from services.graph_service import GraphService
+from services.graphrag_pipeline_service import graphrag_pipeline_service
 from models.document import AIExtractionRequest
 from infra.queue import get_queue
 from infra.config import settings
 from config import get_instance, InstanceNames
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
+
+logger = logging.getLogger("routes.upload")
 
 storage = Storage()
 extractor = TripletExtractor()
@@ -649,69 +653,54 @@ def process_document_background(
             print(f"   - 用户Prompt: {user_prompt[:100]}...")
         print(f"{'#'*80}\n")
         
-        # 检查任务是否已取消
         if _is_job_cancelled(job_id):
             print(f"❌ [任务取消] 任务已被用户取消")
             _update_upload_status(job_id, "cancelled", 0, "任务已被用户取消", documentId=doc_id)
             return
         
-        # 优先使用 GraphRAG Pipeline（如果可用）
         if graphrag_pipeline_service.is_available():
-            print(f"\n🧠 [GraphRAG模式] 使用 Neo4j GraphRAG SimpleKGPipeline")
+            print(f"\n🧠 [GraphRAG Pipeline模式] 使用八阶段知识图谱构建流水线")
             
-            _update_upload_status(job_id, "processing", 25, "正在进行GraphRAG处理...", documentId=doc_id)
-            
-            import asyncio
-            from asyncio import TimeoutError
-            logger = __import__('logging').getLogger('routes.upload')
+            _update_upload_status(job_id, "processing", 10, "正在解析文档...", documentId=doc_id)
             
             try:
-                # 在后台线程中创建新的事件循环（避免 "no current event loop" 错误）
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                stats = loop.run_until_complete(asyncio.wait_for(
-                    graphrag_pipeline_service.process_document(
-                        file_path=file_path,
-                        doc_id=doc_id,
-                        root_topic=root_topic,
-                        user_prompt=user_prompt,
-                        timeout=300
-                    ),
-                    timeout=320  # 比内部超时多20秒，处理网络延迟
-                ))
-                loop.close()
+                stats = graphrag_pipeline_service.process_document_sync(
+                    file_path=file_path,
+                    doc_id=doc_id,
+                    root_topic=root_topic,
+                    user_prompt=user_prompt,
+                    timeout=600
+                )
                 
-                print(f"\n🎉 [GraphRAG处理完成]")
+                print(f"\n🎉 [GraphRAG Pipeline处理完成]")
                 print(f"   - 文本块数: {stats.get('chunks', 0)}")
                 print(f"   - 实体数: {stats.get('entities', 0)}")
+                print(f"   - 论断数: {stats.get('claims', 0)}")
+                print(f"   - 主题数: {stats.get('themes', 0)}")
                 print(f"   - 关系数: {stats.get('relationships', 0)}")
-                print(f"   - 向量数: {stats.get('vectors_generated', 0)}")
-                if stats.get('themes'):
-                    print(f"   - 主题: {', '.join(stats['themes'][:3])}...")
+                print(f"   - 处理耗时: {stats.get('execution_time', 0):.2f}s")
+                
+                quality = stats.get('quality_metrics', {})
+                if quality:
+                    print(f"   - 质量指标:")
+                    print(f"     * 孤立节点比例: {quality.get('isolated_node_ratio', 0):.2%}")
+                    print(f"     * 平均度数: {quality.get('avg_degree', 0):.2f}")
                 
                 result_data = {"stats": stats}
-                if stats.get('themes'):
-                    result_data["insights"] = stats['themes'][:5]
+                if stats.get('quality_metrics'):
+                    result_data["quality_metrics"] = stats['quality_metrics']
                 
-                _update_upload_status(job_id, "completed", 100, "GraphRAG处理完成！", documentId=doc_id, **result_data)
-                logger.info(f"GraphRAG pipeline completed successfully for doc_id: {doc_id}")
+                _update_upload_status(job_id, "completed", 100, "GraphRAG Pipeline处理完成！", documentId=doc_id, **result_data)
+                logger.info(f"GraphRAG Pipeline completed successfully for doc_id: {doc_id}")
                 return
             
-            except TimeoutError:
-                error_msg = f"GraphRAG Pipeline处理超时"
-                print(f"⏰ {error_msg}")
-                logger.error(error_msg)
-                _update_upload_status(job_id, "failed", 50, error_msg, documentId=doc_id)
-                return
             except Exception as e:
                 error_msg = f"GraphRAG Pipeline执行失败，回退到传统模式: {str(e)}"
                 print(f"⚠️  {error_msg}")
                 logger.warning(error_msg)
         
-        # 传统处理模式（回退方案）
         print(f"\n🤖 [传统模式] 使用传统处理流程")
         
-        # Step 1: Parse document
         _update_upload_status(job_id, "processing", 10, "正在解析文档...", documentId=doc_id)
         
         print(f"📖 [步骤1] 解析文档 (chunk_size={chunk_size})...")
@@ -722,14 +711,12 @@ def process_document_background(
             avg_chunk_size = sum(len(c.text) for c in chunks) / len(chunks)
             print(f"   - 平均每个文本块: {avg_chunk_size:.0f} 字符")
         
-        # AI智能分词模式 - 硬编码始终启用
         ai_segmenter = get_ai_segmenter()
         enable_ai_segmentation = True
         
         if ai_segmenter:
             print(f"\n🧠 [AI模式] 启用智能知识抽取")
             
-            # Step 1.5: Optimize user prompt if provided
             final_prompt = None
             if user_prompt:
                 _update_upload_status(job_id, "processing", 15, "正在优化分析提示词...", documentId=doc_id)
@@ -741,7 +728,6 @@ def process_document_background(
                     final_prompt = user_prompt
                     print(f"📝 [Prompt] 使用原始用户提示词")
             
-            # Step 2: Analyze document structure
             _update_upload_status(job_id, "processing", 20, "正在分析文档结构...", documentId=doc_id)
             
             print(f"\n🔍 [文档分析] 分析文档整体结构...")
@@ -751,7 +737,6 @@ def process_document_background(
             print(f"   - 领域: {', '.join(doc_context.get('domains', []))}")
             print(f"   - 关键概念: {', '.join(doc_context.get('key_concepts', [])[:5])}...")
             
-            # Step 3: Extract rich knowledge from each chunk
             _update_upload_status(job_id, "processing", 30, "正在进行深度知识抽取...", documentId=doc_id)
             
             print(f"\n💎 [深度抽取] 开始智能知识抽取 (共 {len(chunks)} 个文本块)...")
@@ -760,7 +745,6 @@ def process_document_background(
             all_insights = []
             
             for i, chunk in enumerate(chunks, 1):
-                # 检查任务是否已取消
                 if _is_job_cancelled(job_id):
                     print(f"❌ [任务取消] 任务已被用户取消")
                     _update_upload_status(job_id, "cancelled", progress, "任务已被用户取消", documentId=doc_id)
@@ -769,15 +753,12 @@ def process_document_background(
                 print(f"\n📦 [文本块 {i}/{len(chunks)}] AI深度分析中...")
                 knowledge = ai_segmenter.extract_rich_knowledge(chunk, doc_context, final_prompt)
                 
-                # 收集三元组
                 triplets = knowledge.get("triplets", [])
                 all_triplets.extend(triplets)
                 
-                # 收集丰富概念
                 concepts = knowledge.get("concepts", [])
                 all_concepts.extend(concepts)
                 
-                # 收集洞察
                 insights = knowledge.get("insights", [])
                 all_insights.extend(insights)
                 
@@ -791,27 +772,23 @@ def process_document_background(
             print(f"   - 总概念数: {len(all_concepts)}")
             print(f"   - 总洞察数: {len(all_insights)}")
             
-            # Step 4: Ingest rich concepts first
             _update_upload_status(job_id, "processing", 75, "正在构建丰富概念...", documentId=doc_id)
             
             print(f"\n💎 [概念构建] 写入丰富概念信息...")
             graph_service.ingest_rich_concepts(doc_id, all_concepts, root_topic=root_topic)
             
-            # Step 5: Link and merge entities
             _update_upload_status(job_id, "processing", 80, "正在链接实体...", documentId=doc_id)
             
             print(f"\n🔗 [实体链接] 开始实体链接和合并...")
             linked_triplets = linker.link_and_merge(all_triplets)
             print(f"✅ [实体链接] 完成: {len(linked_triplets)} 个三元组")
             
-            # Step 6: Ingest triplets
             _update_upload_status(job_id, "processing", 90, "正在构建知识图谱...", documentId=doc_id)
             
             print(f"\n💾 [图谱构建] 开始构建知识图谱...")
             graph_service.ingest_triplets(doc_id, linked_triplets, root_topic=root_topic)
             print(f"✅ [图谱构建] 完成")
             
-            # Get statistics
             concept_names = set(c["name"] for c in all_concepts)
             
             print(f"\n{'#'*80}")
@@ -837,9 +814,8 @@ def process_document_background(
             }
             result_data = {"stats": stats}
             if all_insights:
-                result_data["insights"] = all_insights[:10]  # 返回前10条洞察
+                result_data["insights"] = all_insights[:10]
             
-            # 更新Neo4j中的文档统计信息
             try:
                 neo4j_client.execute_query("""
                     MATCH (d:Document {id: $doc_id})
@@ -869,16 +845,13 @@ def process_document_background(
             _update_upload_status(job_id, "completed", 100, "AI智能分析完成！", documentId=doc_id, **result_data)
         
         else:
-            # 传统模式
             _update_upload_status(job_id, "processing", 30, f"已提取 {len(chunks)} 个文本块，正在进行知识抽取...", documentId=doc_id)
             
-            # Step 2: Extract triplets using AI
             print(f"\n🤖 [步骤2] 开始知识抽取 (共 {len(chunks)} 个文本块)...")
             all_triplets = []
             chunk_triplet_counts = []
             
             for i, chunk in enumerate(chunks, 1):
-                # 检查任务是否已取消
                 if _is_job_cancelled(job_id):
                     print(f"❌ [任务取消] 任务已被用户取消")
                     _update_upload_status(job_id, "cancelled", progress, "任务已被用户取消", documentId=doc_id)
@@ -898,19 +871,16 @@ def process_document_background(
             
             _update_upload_status(job_id, "processing", 70, f"已抽取 {len(all_triplets)} 个知识三元组，正在链接实体...", documentId=doc_id)
             
-            # Step 3: Link and merge entities
             print(f"\n🔗 [步骤3] 开始实体链接和合并...")
             linked_triplets = linker.link_and_merge(all_triplets)
             print(f"✅ [步骤3] 实体链接完成: {len(linked_triplets)} 个三元组")
             
             _update_upload_status(job_id, "processing", 85, "正在构建知识图谱...", documentId=doc_id)
             
-            # Step 4: Ingest into Neo4j
             print(f"\n💾 [步骤4] 开始构建知识图谱...")
             graph_service.ingest_triplets(doc_id, linked_triplets, root_topic=root_topic)
             print(f"✅ [步骤4] 知识图谱构建完成")
             
-            # Get graph statistics
             concept_names = set(t.subject for t in linked_triplets) | set(t.object for t in linked_triplets)
             
             print(f"\n{'#'*80}")
@@ -921,7 +891,6 @@ def process_document_background(
             print(f"   - 文本总长度: {len(full_text)} 字符")
             print(f"{'#'*80}\n")
 
-            # 尝试将数据保存到neo4j数据库中，保持Cache和数据库的一致性，避免前端只查询neo4j获得空数据
             stats = {
                 "chunks": len(chunks),
                 "triplets": len(linked_triplets),

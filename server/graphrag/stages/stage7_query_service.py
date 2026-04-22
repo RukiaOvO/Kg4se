@@ -202,7 +202,7 @@ class QueryService:
         Returns:
             (claim_candidates, concept_candidates)
         """
-        logger.info(f"多路候选生成: mode={mode}, recall_limit={recall_limit}")
+        logger.info(f"[Stage7] 多路候选生成: mode={mode}, recall_limit={recall_limit}")
         
         claim_candidates: List[CandidateEvidence] = []
         concept_candidates: List[ConceptCandidate] = []
@@ -211,7 +211,9 @@ class QueryService:
         
         # 1. 主题匹配召回（Global/Hybrid 模式）
         if mode in ["global", "hybrid"]:
+            logger.debug(f"[Stage7] 开始主题匹配召回...")
             theme_claims, theme_concepts = self._retrieve_by_theme(question, recall_limit)
+            logger.debug(f"[Stage7] 主题匹配返回: {len(theme_claims)} claims, {len(theme_concepts)} concepts")
             for claim in theme_claims:
                 if claim.claim_id not in seen_claim_ids:
                     claim_candidates.append(claim)
@@ -223,7 +225,9 @@ class QueryService:
             logger.info(f"主题匹配召回: {len(theme_claims)} claims, {len(theme_concepts)} concepts")
         
         # 2. 向量检索
+        logger.debug(f"[Stage7] 开始向量检索...")
         vector_claims, vector_concepts = self._retrieve_by_vector(question, recall_limit)
+        logger.debug(f"[Stage7] 向量检索返回: {len(vector_claims)} claims, {len(vector_concepts)} concepts")
         for claim in vector_claims:
             if claim.claim_id not in seen_claim_ids:
                 claim_candidates.append(claim)
@@ -235,7 +239,9 @@ class QueryService:
         logger.info(f"向量检索召回: {len(vector_claims)} claims, {len(vector_concepts)} concepts")
         
         # 3. 关键词匹配（BM25 风格）
+        logger.debug(f"[Stage7] 开始关键词匹配...")
         keyword_claims, keyword_concepts = self._retrieve_by_keyword(question, recall_limit)
+        logger.debug(f"[Stage7] 关键词匹配返回: {len(keyword_claims)} claims, {len(keyword_concepts)} concepts")
         for claim in keyword_claims:
             if claim.claim_id not in seen_claim_ids:
                 claim_candidates.append(claim)
@@ -248,9 +254,11 @@ class QueryService:
         
         # 4. 图遍历（Local/Hybrid 模式）
         if mode in ["local", "hybrid"]:
+            logger.debug(f"[Stage7] 开始图遍历...")
             graph_claims, graph_concepts = self._retrieve_by_graph_traversal(
                 question, concept_candidates, recall_limit
             )
+            logger.debug(f"[Stage7] 图遍历返回: {len(graph_claims)} claims, {len(graph_concepts)} concepts")
             for claim in graph_claims:
                 if claim.claim_id not in seen_claim_ids:
                     claim_candidates.append(claim)

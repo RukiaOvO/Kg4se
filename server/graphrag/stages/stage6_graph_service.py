@@ -286,7 +286,8 @@ class GraphService:
         Args:
             chunk: Chunk 数据
         """
-        logger.debug("存储 Chunk: %s", chunk.get("id"))
+        chunk_id = chunk.get("id")
+        logger.debug(f"[Stage6] 存储 Chunk: {chunk_id}")
         
         query = """
         MERGE (c:Chunk {id: $id})
@@ -335,7 +336,8 @@ class GraphService:
         Args:
             concept: Concept 数据
         """
-        logger.debug("存储 Concept: %s", concept.get("id"))
+        concept_id = concept.get("id")
+        logger.debug(f"[Stage6] 存储 Concept: {concept_id}")
         
         query = """
         MERGE (c:Concept {id: $id})
@@ -372,7 +374,8 @@ class GraphService:
         Args:
             claim: Claim 数据
         """
-        logger.debug("存储 Claim: %s", claim.get("id"))
+        claim_id = claim.get("id")
+        logger.debug(f"[Stage6] 存储 Claim: {claim_id}")
         
         query = """
         MERGE (cl:Claim {id: $id})
@@ -417,7 +420,10 @@ class GraphService:
         Args:
             relation: 关系数据 {source_id, target_id, type, properties}
         """
-        logger.debug("存储关系: %s -%s-> %s", relation.get("source_id"), relation.get("type"), relation.get("target_id"))
+        source_id = relation.get("source_id")
+        target_id = relation.get("target_id")
+        rel_type = relation.get("type")
+        logger.debug(f"[Stage6] 存储关系: {source_id} -[{rel_type}]-> {target_id}")
         
         query = """
         MATCH (s {id: $source_id}), (t {id: $target_id})

@@ -156,14 +156,18 @@ class ThemeBuilder:
             YIELD graphName, nodeCount, relationshipCount
             """
             
+            logger.debug(f"[Stage4] 执行 GDS 投影查询, doc_id={doc_id}")
             try:
-                neo4j_client.execute_query(query, {"doc_id": doc_id})
+                result = neo4j_client.execute_query(query, {"doc_id": doc_id})
+                logger.debug(f"[Stage4] GDS 投影查询返回: {result}")
                 logger.debug(f"GDS 图投影创建成功: {graph_name}")
             except Exception as e:
                 logger.warning(f"GDS 投影失败，使用简化方法: {e}")
                 # 简化方法：直接在查询时使用 RELATED_TO 关系
         except Exception as e:
+            import traceback
             logger.error(f"创建概念图失败: {e}")
+            logger.error(f"创建概念图失败堆栈: {traceback.format_exc()}")
             raise
     
     def _build_weighted_relations(self, doc_id: str):
@@ -195,18 +199,41 @@ class ThemeBuilder:
         """
         cooccur_results = neo4j_client.execute_query(cooccur_query, {"doc_id": doc_id})
         
+        logger.debug(f"[Stage4] 共现查询返回: {len(cooccur_results)} 条记录")
+        
         # 归一化共现次数（使用对数归一化）
         cooccur_pairs = {}
         max_cooccur = 0
+        
         for record in cooccur_results:
             c1_name = record.get("c1_name")
             c2_name = record.get("c2_name")
             count = record.get("cooccur_count", 0)
-            if c1_name and c2_name:
-                # 确保键的顺序一致（小->大）
+            
+            # 防御性处理：确保名称是字符串，不是 dict
+            if isinstance(c1_name, dict):
+                logger.warning(f"[Stage4] c1_name 是 dict 类型: {type(c1_name)}, 尝试提取 name 字段")
+                c1_name = c1_name.get("name") if c1_name.get("name") else str(c1_name)
+            if isinstance(c2_name, dict):
+                logger.warning(f"[Stage4] c2_name 是 dict 类型: {type(c2_name)}, 尝试提取 name 字段")
+                c2_name = c2_name.get("name") if c2_name.get("name") else str(c2_name)
+            
+            if not isinstance(c1_name, str):
+                c1_name = str(c1_name) if c1_name is not None else None
+            if not isinstance(c2_name, str):
+                c2_name = str(c2_name) if c2_name is not None else None
+            
+            if c1_name and c2_name and isinstance(c1_name, str) and isinstance(c2_name, str):
                 key = tuple(sorted([c1_name, c2_name]))
-                cooccur_pairs[key] = count
-                max_cooccur = max(max_cooccur, count)
+                # 确保 count 是数值
+                try:
+                    cooccur_pairs[key] = int(count) if count else 0
+                    max_cooccur = max(max_cooccur, cooccur_pairs[key])
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[Stage4] 共现 count 转换失败: {count}, error: {e}")
+                    pass
+            else:
+                logger.warning(f"[Stage4] 跳过无效共现记录: c1_name={c1_name}({type(c1_name)}), c2_name={c2_name}({type(c2_name)})")
         
         # 2. 计算语义相似度（基于 Concept embedding）- 优化：使用向量化批量计算
         logger.debug("计算语义相似度...")
@@ -222,11 +249,43 @@ class ThemeBuilder:
         
         # 构建 embedding 字典
         concept_embeddings = {}
+        logger.debug(f"[Stage4] 语义查询返回: {len(semantic_results)} 条记录")
+        
         for record in semantic_results:
             name = record.get("name")
             embedding = record.get("embedding")
-            if name and embedding:
-                concept_embeddings[name] = embedding
+            
+            logger.debug(f"[Stage4] 处理 concept: name={name}({type(name)}), embedding={type(embedding)}")
+            
+            # 防御性处理：确保名称和 embedding 是正确类型
+            if not isinstance(name, str):
+                if isinstance(name, dict):
+                    logger.warning(f"[Stage4] name 是 dict 类型: {name}")
+                    name = name.get("name") if name.get("name") else str(name)
+                else:
+                    name = str(name) if name is not None else None
+            
+            # 防御性处理：确保 embedding 是 list 类型，不是 dict 或其他
+            if embedding is not None and not isinstance(embedding, list):
+                logger.warning(f"[Stage4] embedding 不是 list: type={type(embedding)}, value={str(embedding)[:100]}...")
+                if isinstance(embedding, dict):
+                    # 如果是 dict，尝试提取数值
+                    embedding = embedding.get("data") or embedding.get("vector") or list(embedding.values()) if embedding else None
+                    logger.warning(f"[Stage4] 尝试从 dict 提取 embedding: {type(embedding)}")
+                else:
+                    embedding = None
+            
+            if name and embedding and isinstance(name, str) and isinstance(embedding, list):
+                # 确保 embedding 是纯数值列表
+                try:
+                    concept_embeddings[name] = [float(x) for x in embedding]
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[Stage4] embedding 转换失败: name={name}, error: {e}")
+                    continue
+            else:
+                logger.warning(f"[Stage4] 跳过无效 embedding: name={name}({type(name)}), embedding={embedding}({type(embedding)})")
+        
+        logger.debug(f"[Stage4] 语义查询返回: {len(semantic_results)} 条记录, 有效embeddings: {len(concept_embeddings)}")
         
         # 优化：使用向量化批量计算所有概念对的语义相似度
         semantic_pairs = {}
@@ -267,27 +326,57 @@ class ThemeBuilder:
         """
         claim_results = neo4j_client.execute_query(claim_query, {"doc_id": doc_id})
         
+        logger.debug(f"[Stage4] 论断共现查询返回: {len(claim_results)} 条记录")
+        
         claim_pairs = {}
         max_claim_cooccur = 0
+        
         for record in claim_results:
             c1_name = record.get("c1_name")
             c2_name = record.get("c2_name")
             count = record.get("claim_cooccur_count", 0)
-            if c1_name and c2_name:
+            
+            # 防御性处理：确保名称是字符串，不是 dict
+            if isinstance(c1_name, dict):
+                logger.warning(f"[Stage4] claim c1_name 是 dict 类型: {type(c1_name)}, 尝试提取 name 字段")
+                c1_name = c1_name.get("name") if c1_name.get("name") else str(c1_name)
+            if isinstance(c2_name, dict):
+                logger.warning(f"[Stage4] claim c2_name 是 dict 类型: {type(c2_name)}, 尝试提取 name 字段")
+                c2_name = c2_name.get("name") if c2_name.get("name") else str(c2_name)
+            
+            if not isinstance(c1_name, str):
+                c1_name = str(c1_name) if c1_name is not None else None
+            if not isinstance(c2_name, str):
+                c2_name = str(c2_name) if c2_name is not None else None
+            
+            if c1_name and c2_name and isinstance(c1_name, str) and isinstance(c2_name, str):
                 key = tuple(sorted([c1_name, c2_name]))
-                claim_pairs[key] = count
-                max_claim_cooccur = max(max_claim_cooccur, count)
+                try:
+                    claim_pairs[key] = int(count) if count else 0
+                    max_claim_cooccur = max(max_claim_cooccur, claim_pairs[key])
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"[Stage4] claim count 转换失败: {count}, error: {e}")
+                    pass
+            else:
+                logger.warning(f"[Stage4] 跳过无效论断共现记录: c1_name={c1_name}({type(c1_name)}), c2_name={c2_name}({type(c2_name)})")
         
         # 4. 融合权重并归一化（同时保存归一化权重，避免重复计算）
         logger.debug("融合多源权重...")
         all_pairs = set(cooccur_pairs.keys()) | set(semantic_pairs.keys()) | set(claim_pairs.keys())
         
+        logger.debug(f"[Stage4] 权重融合: 共现对={len(cooccur_pairs)}, 语义对={len(semantic_pairs)}, 论断对={len(claim_pairs)}, 合并后={len(all_pairs)}")
+        
         # 存储归一化权重（用于后续批量写入）
         normalized_weights = {}  # pair -> (cooccur_norm, semantic_norm, claim_norm, final_weight)
         
         weighted_relations = []
-        for pair in all_pairs:
+        for idx, pair in enumerate(all_pairs):
             c1_name, c2_name = pair
+            
+            # 检查 pair 是否可哈希
+            if not isinstance(pair, tuple):
+                logger.warning(f"[Stage4] pair 不是 tuple: {pair}({type(pair)}), 跳过")
+                continue
             
             # 归一化共现权重（对数归一化）
             cooccur_norm = 0.0
@@ -314,6 +403,8 @@ class ThemeBuilder:
                 weighted_relations.append((c1_name, c2_name, final_weight))
                 # 保存归一化权重，避免后续重复计算
                 normalized_weights[pair] = (cooccur_norm, semantic_norm, claim_norm, final_weight)
+            else:
+                logger.debug(f"[Stage4] 权重低于阈值跳过: ({c1_name}, {c2_name}), weight={final_weight:.4f} < {min_threshold}")
         
         # 5. 对每个节点应用 top-k 限制
         logger.debug(f"应用 top-k 限制 (max_edges={max_edges})...")
@@ -340,7 +431,7 @@ class ThemeBuilder:
         logger.debug(f"批量写入 Neo4j: {len(filtered_relations)} 条关系")
         
         # 获取批量写入大小配置
-        batch_size = self.config.thresholds.get("performance", {}).get("batch_write_size", 100)
+        batch_size = self.config.thresholds.get("performance", "batch_write_size", 100)
         
         # 准备批量写入数据
         relations_data = []
@@ -377,13 +468,12 @@ class ThemeBuilder:
             MATCH (c1:Concept {name: rel.c1_name})
             MATCH (c2:Concept {name: rel.c2_name})
             MERGE (c1)-[r:RELATED_TO]-(c2)
+            ON CREATE SET r.created_at = datetime()
             SET r.weight = rel.weight,
                 r.cooccur_weight = rel.cooccur_norm,
                 r.semantic_weight = rel.semantic_norm,
                 r.claim_weight = rel.claim_norm,
                 r.updated_at = datetime()
-            ON CREATE SET
-                r.created_at = datetime()
             """
             
             neo4j_client.execute_query(batch_query, {"relations": batch})
@@ -400,13 +490,11 @@ class ThemeBuilder:
         try:
             # 尝试使用 GDS Louvain 算法
             louvain_config = self.thresholds.get("louvain", {})
-            resolution = louvain_config.get("resolution", 1.0)
             max_iterations = louvain_config.get("max_iterations", 50)
             tolerance = louvain_config.get("tolerance", 0.001)
             
             query = f"""
             CALL gds.louvain.stream('{graph_name}', {{
-                resolution: $resolution,
                 maxIterations: $max_iterations,
                 tolerance: $tolerance
             }})
@@ -415,7 +503,6 @@ class ThemeBuilder:
             """
             
             results = neo4j_client.execute_query(query, {
-                "resolution": resolution,
                 "max_iterations": max_iterations,
                 "tolerance": tolerance
             })
@@ -644,7 +731,6 @@ class ThemeBuilder:
             
             query = f"""
             CALL gds.louvain.stream('{graph_name}', {{
-                resolution: $resolution,
                 maxIterations: $max_iterations,
                 tolerance: $tolerance
             }})
@@ -653,7 +739,6 @@ class ThemeBuilder:
             """
             
             results = neo4j_client.execute_query(query, {
-                "resolution": level1_resolution,
                 "max_iterations": max_iterations,
                 "tolerance": tolerance
             })
@@ -729,21 +814,29 @@ class ThemeBuilder:
         max_iterations: int = 3
     ) -> Dict[str, List[str]]:
         """
-        使用指定分辨率检测 Level 1 社区，并迭代调整直到满足数量限制
+        使用 Louvain 算法检测社区（无分辨率调整）
         """
         for iteration in range(max_iterations):
             communities = {}
             
             try:
+                louvain_config = self.thresholds.get("louvain", {})
+                max_iterations_inner = louvain_config.get("max_iterations", 50)
+                tolerance = louvain_config.get("tolerance", 0.001)
+                
                 query = f"""
                 CALL gds.louvain.stream('{graph_name}', {{
-                    resolution: $resolution
+                    maxIterations: $max_iterations,
+                    tolerance: $tolerance
                 }})
                 YIELD nodeId, communityId
                 RETURN nodeId, communityId
                 """
                 
-                results = neo4j_client.execute_query(query, {"resolution": resolution})
+                results = neo4j_client.execute_query(query, {
+                    "max_iterations": max_iterations_inner,
+                    "tolerance": tolerance
+                })
                 
                 for record in results:
                     node_id = record.get("nodeId")
@@ -855,7 +948,6 @@ class ThemeBuilder:
             
             query = f"""
             CALL gds.louvain.stream('{subgraph_name}', {{
-                resolution: $resolution,
                 maxIterations: $max_iterations,
                 tolerance: $tolerance
             }})
@@ -864,7 +956,6 @@ class ThemeBuilder:
             """
             
             results = neo4j_client.execute_query(query, {
-                "resolution": level2_resolution,
                 "max_iterations": max_iterations,
                 "tolerance": tolerance
             })
@@ -1371,8 +1462,7 @@ class ThemeBuilder:
                     )
                 else:
                     # 回退：并发调用
-                    performance_config = self.config.thresholds.get("performance", {})
-                    max_workers = performance_config.get("llm_concurrency", 10)
+                    max_workers = self.config.thresholds.get("performance", "llm_concurrency", 10)
                     
                     with ThreadPoolExecutor(max_workers=max_workers) as executor:
                         futures = {}
@@ -1548,8 +1638,7 @@ class ThemeBuilder:
         logger.debug(f"批量存储主题: {len(themes)} 个主题")
         
         # 1. 批量创建/更新 Theme 节点
-        performance_config = self.config.thresholds.get("performance", {})
-        batch_size = performance_config.get("batch_write_size", 200)
+        batch_size = self.config.thresholds.get("performance", "batch_write_size", 200)
         
         for i in range(0, len(themes), batch_size):
             batch = themes[i:i + batch_size]
@@ -1558,6 +1647,7 @@ class ThemeBuilder:
             query = """
             UNWIND $themes AS theme
             MERGE (t:Theme {id: theme.id})
+            ON CREATE SET t.created_at = datetime()
             SET t.label = theme.label,
                 t.summary = theme.summary,
                 t.level = theme.level,
@@ -1569,8 +1659,6 @@ class ThemeBuilder:
                 t.key_evidence = theme.key_evidence,
                 t.build_version = theme.build_version,
                 t.updated_at = datetime()
-            ON CREATE SET
-                t.created_at = datetime()
             """
             
             themes_data = []

@@ -30,25 +30,25 @@ class ClaimExtractor:
     使用 LLM 提取论断与关系
     """
     
-    def __init__(self):
+    def __init__(self, enable_nli: bool = False):
         self.config = get_config()
         self.client = None
+        self.enable_nli = enable_nli
         
-        # 使用统一的 PromptManager 加载 Prompt 模板
         prompt_manager = PromptManager()
         self.prompt_template = prompt_manager.get("graphrag", "claim_extraction")
         
-        # 如果没有找到，使用默认 Prompt（向后兼容）
         if not self.prompt_template:
             self.prompt_template = self._default_prompt()
         
-        # 初始化 AI 客户端
         try:
             ai_config = config_service.get_ai_provider_config()
             provider = ai_config["provider"]
             api_key = ai_config["api_key"]
             model = ai_config["model"]
             base_url = ai_config["base_url"]
+            
+            logger.info(f"[ClaimExtractor] AI配置: provider={provider}, model={model}, api_key={'已配置' if api_key else '未配置'}")
             
             if provider != "mock" and api_key:
                 self.client = AIProviderFactory.create_client(
@@ -57,16 +57,16 @@ class ClaimExtractor:
                     model=model,
                     base_url=base_url
                 )
-                logger.info(f"ClaimExtractor initialized with {provider}")
+                logger.info(f"[ClaimExtractor] AI客户端初始化成功: provider={provider}, model={model}")
             else:
-                logger.warning("AI client not available, using mock mode")
+                logger.warning(f"[ClaimExtractor] AI客户端未初始化: provider={provider}, api_key={'已配置' if api_key else '未配置'}")
         except Exception as e:
-            logger.warning(f"Failed to initialize AI client: {e}, using mock mode")
+            logger.error(f"[ClaimExtractor] AI客户端初始化失败: {e}", exc_info=True)
         
-        # 初始化 NLI 验证器（P2 优化）
-        self.nli_verifier = NLIVerifier(client=self.client)
+        self.nli_verifier = NLIVerifier(client=self.client) if self.enable_nli else None
         
-        logger.info("ClaimExtractor initialized (P2: NLI verification enabled)")
+        nli_status = "enabled" if self.enable_nli else "disabled"
+        logger.info(f"[ClaimExtractor] 初始化完成 (NLI验证: {nli_status})")
     
     def extract(
         self, 
@@ -98,20 +98,24 @@ class ClaimExtractor:
         text = chunk.resolved_text if use_resolved_text else chunk.text
         
         if not self.client:
-            # Mock 模式：返回空结果
             logger.debug("Using mock mode, returning empty results")
             return [], []
         
         try:
-            # 1. 构造 Prompt（P2：使用上下文增强的文本）
             prompt_text = context_text if context_text else text
-            prompt = self.prompt_template.format(text=prompt_text)
             
-            # 2. 调用 LLM
+            logger.debug(f"[Stage3] prompt_template 长度: {len(self.prompt_template)}")
+            logger.debug(f"[Stage3] prompt_text 长度: {len(prompt_text)}")
+            
+            prompt = self.prompt_template.format(input_text=prompt_text)
+            
+            logger.debug(f"[Stage3] 渲染后 prompt 长度: {len(prompt)}")
+            logger.debug(f"[Stage3] 渲染后 prompt 前100字符: {prompt[:100]}")
+            
             messages = [
                 {
                     "role": "system",
-                    "content": "你是一个专业的知识图谱构建专家，擅长从学术文本中提取论断与观点。请严格按照 JSON 格式返回结果。"
+                    "content": "你是一个专业的知识图谱构建专家，擅长从学术文本中提取论断与观点。请严格按照 JSON 格式返回结果，必须包含 claims 数组。"
                 },
                 {
                     "role": "user",
@@ -125,18 +129,60 @@ class ClaimExtractor:
                 json_mode=True
             )
             
-            # 3. 解析 JSON 响应
-            result = json.loads(raw_content)
+            if not raw_content:
+                logger.error("[Stage3] LLM 返回空内容")
+                return [], []
+                
+            logger.info(f"[Stage3] LLM原始响应长度: {len(raw_content)} 字符")
+            logger.debug(f"[Stage3] LLM原始响应: {raw_content[:1000]}")
+            
+            try:
+                result = json.loads(raw_content)
+            except json.JSONDecodeError as e:
+                logger.error(f"[Stage3] JSON解析失败: {e}")
+                logger.error(f"[Stage3] 原始内容: {raw_content[:500]}")
+                
+                import re
+                json_match = re.search(r'\{[\s\S]*\}', raw_content)
+                if json_match:
+                    try:
+                        result = json.loads(json_match.group())
+                        logger.info(f"[Stage3] 从文本中提取JSON成功")
+                    except:
+                        logger.error(f"[Stage3] 无法从文本中提取有效JSON")
+                        return [], []
+                else:
+                    return [], []
+            
             raw_claims = result.get("claims", [])
+            if not raw_claims and "entities" in result:
+                logger.warning(f"[Stage3] LLM返回了entities字段而非claims字段，尝试转换")
+                entities = result.get("entities", [])
+                logger.debug(f"[Stage3] entities数量: {len(entities)}")
+                raw_claims = []
+                for entity in entities:
+                    if isinstance(entity, dict) and "text" in entity:
+                        raw_claims.append(entity)
+                    elif isinstance(entity, str):
+                        raw_claims.append({"text": entity, "type": "fact", "confidence": 0.7})
+            
             raw_relations = result.get("relations", [])
+            
+            logger.info(f"[Stage3] 解析结果: claims={len(raw_claims)}, relations={len(raw_relations)}")
+            if raw_claims:
+                claim_types = [c.get("type", "unknown") for c in raw_claims[:5]]
+                logger.debug(f"[Stage3] 前5个claim类型: {claim_types}")
             
             # 4. 构造 Claim 对象（P0 优化：证据对齐 + 属性检测）
             claims = []
+            skipped_short = 0
             for idx, raw_claim in enumerate(raw_claims):
                 claim_text = raw_claim.get("text", "").strip()
                 if not claim_text or len(claim_text) < 20:
-                    logger.debug(f"跳过过短的论断: {claim_text[:50]}")
+                    skipped_short += 1
                     continue
+                
+                logger.debug(f"[Stage3] 处理论断 {idx+1}/{len(raw_claims)}: {claim_text[:30]}...")
                 
                 claim_id = hashlib.sha256(
                     f"{chunk.id}:{idx}:{claim_text}".encode()
@@ -165,41 +211,40 @@ class ClaimExtractor:
                 else:
                     adjusted_confidence = raw_claim.get("confidence", 0.7)
                 
-                # 4.2 检测 modality、polarity、certainty（P0 简化版）
                 modality = self._detect_modality(claim_text)
                 polarity = self._detect_polarity(claim_text)
                 certainty = self._compute_certainty(claim_text, adjusted_confidence, modality)
                 
-                # P2 优化：多头验证 - NLI 验证 + 不确定性检测
-                nli_result = self.nli_verifier.verify_claim(
-                    claim_text=claim_text,
-                    source_text=text,
-                    max_retries=2  # 多头验证：2次调用
-                )
-                
-                # 根据 NLI 结果调整置信度
-                if nli_result["label"] == "entailment":
-                    # 论断可以从原文推理出来，提高置信度
-                    adjusted_confidence = min(1.0, adjusted_confidence * 1.1)
-                elif nli_result["label"] == "contradiction":
-                    # 论断与原文矛盾，大幅降低置信度
-                    adjusted_confidence = adjusted_confidence * 0.5
-                elif nli_result["label"] == "neutral":
-                    # 无法确定，略微降低置信度
-                    adjusted_confidence = adjusted_confidence * 0.9
-                
-                # 更新 certainty（考虑 NLI 验证结果）
-                nli_confidence = nli_result.get("confidence", 0.5)
-                certainty = (certainty + nli_confidence) / 2.0
-                
-                logger.debug(
-                    f"论断验证: claim='{claim_text[:50]}...', "
-                    f"NLI={nli_result['label']}({nli_confidence:.2f}), "
-                    f"最终置信度={adjusted_confidence:.2f}"
-                )
+                if self.enable_nli and self.nli_verifier:
+                    nli_result = self.nli_verifier.verify_claim(
+                        claim_text=claim_text,
+                        source_text=text,
+                        max_retries=1
+                    )
+                    
+                    if nli_result["label"] == "entailment":
+                        adjusted_confidence = min(1.0, adjusted_confidence * 1.1)
+                    elif nli_result["label"] == "contradiction":
+                        adjusted_confidence = adjusted_confidence * 0.5
+                    elif nli_result["label"] == "neutral":
+                        adjusted_confidence = adjusted_confidence * 0.9
+                    
+                    nli_confidence = nli_result.get("confidence", 0.5)
+                    certainty = (certainty + nli_confidence) / 2.0
+                    
+                    logger.debug(
+                        f"论断验证: claim='{claim_text[:50]}...', "
+                        f"NLI={nli_result['label']}({nli_confidence:.2f}), "
+                        f"最终置信度={adjusted_confidence:.2f}"
+                    )
                 
                 # 4.3 计算规范化文本哈希（用于去重）
                 normalized_text_hash = compute_text_hash(claim_text)
+                
+                # 映射 claim_type 到有效值
+                valid_claim_types = {"fact", "hypothesis", "conclusion", "definition", "finding", "recommendation"}
+                claim_type_raw = raw_claim.get("type", "fact")
+                claim_type = claim_type_raw if claim_type_raw in valid_claim_types else "fact"
                 
                 claim = Claim(
                     id=f"claim_{claim_id}",
@@ -209,7 +254,7 @@ class ClaimExtractor:
                     sentence_ids=chunk.sentence_ids,
                     evidence_span=evidence_span,
                     section_path=chunk.section_path,
-                    claim_type=raw_claim.get("type", "fact"),
+                    claim_type=claim_type,
                     confidence=adjusted_confidence,
                     modality=modality,
                     polarity=polarity,
@@ -219,8 +264,11 @@ class ClaimExtractor:
                 )
                 claims.append(claim)
             
+            logger.debug(f"[Stage3] 有效论断数量: {len(claims)}, 跳过过短: {skipped_short}")
+            
             # 4.4 去重与规范化（P0 核心功能）
             if claims:
+                logger.debug(f"[Stage3] 开始去重: {len(claims)} 个论断")
                 claims, merged_map = deduplicate_claims(
                     claims,
                     enable_soft_cluster=True,
@@ -246,22 +294,26 @@ class ClaimExtractor:
                 base_confidence = raw_rel.get("confidence", 0.7)
                 
                 # 使用 NLI 验证关系是否正确
-                relation_context = raw_rel.get("evidence") or text
-                nli_relation_result = self.nli_verifier.verify_relation(
-                    source_claim=source_claim.text,
-                    target_claim=target_claim.text,
-                    relation_type=relation_type,
-                    context=relation_context,
-                    max_retries=2  # 多头验证
-                )
-                
-                # 根据 NLI 验证结果调整关系置信度
-                if nli_relation_result["is_valid"]:
-                    # 关系有效，提高置信度
-                    final_confidence = min(1.0, base_confidence * 1.1)
+                if self.enable_nli and self.nli_verifier:
+                    relation_context = raw_rel.get("evidence") or text
+                    nli_relation_result = self.nli_verifier.verify_relation(
+                        source_claim=source_claim.text,
+                        target_claim=target_claim.text,
+                        relation_type=relation_type,
+                        context=relation_context,
+                        max_retries=2  # 多头验证
+                    )
+                    
+                    # 根据 NLI 验证结果调整关系置信度
+                    if nli_relation_result["is_valid"]:
+                        # 关系有效，提高置信度
+                        final_confidence = min(1.0, base_confidence * 1.1)
+                    else:
+                        # 关系无效，降低置信度
+                        final_confidence = base_confidence * 0.6
                 else:
-                    # 关系无效，降低置信度
-                    final_confidence = base_confidence * 0.6
+                    # 不使用 NLI 验证时，直接使用基础置信度
+                    final_confidence = base_confidence
                 
                 # 如果置信度太低，跳过该关系
                 if final_confidence < 0.4:
@@ -290,7 +342,7 @@ class ClaimExtractor:
                 
                 logger.debug(
                     f"关系验证: {relation_type}, "
-                    f"NLI有效={nli_relation_result['is_valid']}, "
+                    f"NLI有效={'N/A' if not (self.enable_nli and self.nli_verifier) else nli_relation_result.get('is_valid', 'N/A')}, "
                     f"最终置信度={final_confidence:.2f}"
                 )
             
@@ -298,10 +350,21 @@ class ClaimExtractor:
             return claims, relations
             
         except json.JSONDecodeError as e:
-            logger.error(f"JSON 解析错误: {e}")
+            logger.error(f"[Stage3] JSON解析错误: {e}")
+            logger.error(f"[Stage3] 错误位置: line={e.lineno}, col={e.colno}")
+            logger.error(f"[Stage3] 错误内容: {e.msg}")
+            import traceback
+            logger.error(f"[Stage3] 堆栈跟踪:\n{traceback.format_exc()}")
+            return [], []
+        except KeyError as e:
+            import traceback
+            logger.error(f"[Stage3] KeyError: {e}")
+            logger.error(f"[Stage3] KeyError 堆栈:\n{traceback.format_exc()}")
             return [], []
         except Exception as e:
-            logger.error(f"论断抽取失败: {e}")
+            logger.error(f"[Stage3] 论断抽取失败: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"[Stage3] 堆栈跟踪:\n{traceback.format_exc()}")
             return [], []
     
     def _detect_modality(self, text: str) -> Optional[str]:

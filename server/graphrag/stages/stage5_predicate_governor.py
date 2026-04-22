@@ -401,6 +401,8 @@ class PredicateGovernor:
             "predicate_version": self.config.predicates.version
         })
         
+        logger.debug(f"[Stage5] 查询返回: {len(result)} 条待处理关系")
+        
         # 统计结果
         stats = {
             'accepted': 0,
@@ -409,12 +411,16 @@ class PredicateGovernor:
             'soft_violations': 0
         }
         
+        unique_predicates = set()
+        
         for record in result:
             rel_type = record.get("rel_type")
             source_type = record.get("source_type", "Concept")
             target_type = record.get("target_type", "Concept")
             rel_id = record.get("rel_id")
             props = record.get("props", {})
+            
+            unique_predicates.add(rel_type)
             
             # 规范化谓词并获取治理结果
             governance_result = self.normalize(rel_type, source_type, target_type)
@@ -430,6 +436,19 @@ class PredicateGovernor:
                 
             if governance_result['constraint_result'] == ConstraintResult.SOFT_VIOLATION:
                 stats['soft_violations'] += 1
+        
+        logger.debug(f"[Stage5] 唯一谓词类型: {unique_predicates}")
+        
+        # 遍历结果，准备治理元数据并写入
+        for record in result:
+            rel_type = record.get("rel_type")
+            source_type = record.get("source_type", "Concept")
+            target_type = record.get("target_type", "Concept")
+            rel_id = record.get("rel_id")
+            props = record.get("props", {})
+            
+            # 规范化谓词并获取治理结果
+            governance_result = self.normalize(rel_type, source_type, target_type)
             
             # 准备治理元数据
             governance_metadata = {

@@ -2,166 +2,62 @@
 
 # 核心任务
 
-从以下文本中提取**仅限于软件工程领域**的知识点和关系。
+从以下文本中提取**软件工程领域相关的**的论断与观点，并识别论断间关系。
 
 # 文本
 
-{text}
+{input_text}
 
-# 实体类型（仅允许以下5种）
+# 论断类型
 
-1. **KnowledgePoint**：软件工程领域的核心知识点
-   - 示例：设计模式（Singleton, Factory, Observer等）
-   - 数据结构（Binary Tree, Hash Table等）
-   - 算法概念（Dynamic Programming, DFS等）
-   - 面向对象原则（Inheritance, Polymorphism等）
-   - 最佳实践（Refactoring, Clean Code等）
-   - 绝对不包括：通用知识、人物、组织、日期等无关实体
+1. **fact**：客观事实陈述
+2. **hypothesis**：假设或推测
+3. **conclusion**：结论性陈述
 
-2. **Content**：知识点的具体内容
-   - 定义、说明、示例代码等
+# 关系类型
 
-3. **Document**：源文档
-   - 教材、论文、博客等
-
-4. **Question**：实践题目
-   - 练习题、编程挑战等
-
-5. **Timestamp**：时间戳
-   - 仅表示文档更新时间
-
-# 关系类型（仅允许以下5种）
-
-1. **BELONGS_TO**：(KnowledgePoint)-[BELONGS_TO]->(KnowledgePoint)
-   - 子知识点属于父知识点
-   - 例：Singleton(单例) BELONGS_TO Design Pattern(设计模式)
-
-2. **FROM**：(KnowledgePoint)-[FROM]->(Document)
-   - 知识点从该文档中提取
-   - 例：Observer Pattern FROM "Design Patterns Book"
-
-3. **PRACTICES_IS**：(Question)-[PRACTICES_IS]->(KnowledgePoint)
-   - 题目中提到了该知识点
-   - 例：LeetCode Problem 1 PRACTICES_IS Binary Tree Search
-
-4. **HAS_TIMESTAMP**：(Document)-[HAS_TIMESTAMP]->(Timestamp)
-   - 文档的更新时间
-   - 例：Tutorial Document HAS_TIMESTAMP 2024-01-15
-
-5. **IS**：(KnowledgePoint)-[IS]->(Content)
-   - 知识点的具体内容
-   - 例：Singleton IS "Create only one instance of a class"
+1. **SUPPORTS**：支撑关系
+2. **CONTRADICTS**：矛盾关系
+3. **CAUSES**：因果关系
+4. **COMPARES_WITH**：比较关系
+5. **CONDITIONS**：条件关系
+6. **PURPOSE**：目的关系
 
 # 提取要求
 
-1. **严格的领域限制**：
-   - 仅提取软件工程领域的知识点
-   - 过滤所有与软件工程无关的实体
-   - 过滤所有不在上述5种关系中的关系
-
-2. **关键词判断**：
-   - 确认实体包含以下至少一个关键词：
-     设计模式、数据结构、算法、编程、架构、并发、测试、安全、
-     代码质量、性能优化、面向对象、函数式编程
-   
-3. **高质量提取**：
-   - 仅提取高置信度的知识点（置信度 > 0.7）
-   - 确保关系的源端和目标端都是有效实体
-   - 每个知识点至少需要有具体含义，不能是模糊概念
-
-4. **避免的内容**：
-   - ❌ 人物名字（如 Gang of Four）
-   - ❌ 公司或组织名
-   - ❌ 日期或时间表达（除了Timestamp节点）
-   - ❌ 通用词汇（如 "something", "thing"）
-   - ❌ 非软件工程领域的知识
+1. 只提取明确的、完整的论断，避免提取描述性片段
+2. 论断应该是自洽的，不依赖上下文也能理解
+3. 如果论断有多个子句，考虑拆分为多个独立论断
+4. 关系必须基于文本证据，不要推测
+5. 如果文本中没有明确的论断或关系，返回空数组
+6. 为每个论断给出 0.0-1.0 的置信度分数
+7. 标记论断在原文中的位置（字符偏移量）
 
 # 输出格式
 
-返回 JSON 对象，**只包含5种关系类型**：
+返回 JSON 对象：
 
 ```json
-{
-  "entities": [
-    {
-      "id": "entity_001",
-      "name": "设计模式",
-      "type": "KnowledgePoint",
-      "confidence": 0.95,
-      "domain": "software_engineering"
-    },
-    {
-      "id": "entity_002",
-      "name": "单例模式",
-      "type": "KnowledgePoint",
-      "confidence": 0.92,
-      "domain": "software_engineering"
-    },
-    {
-      "id": "entity_003",
-      "name": "具体只能存在一个实例...",
-      "type": "Content",
-      "confidence": 0.90
-    },
-    {
-      "id": "entity_004",
-      "name": "Design Patterns Book",
-      "type": "Document",
-      "confidence": 0.85
-    }
+{{
+  "claims": [
+    {{
+      "text": "论断原文",
+      "type": "fact | hypothesis | conclusion",
+      "confidence": 0.0-1.0,
+      "evidence_span": [start_char, end_char]
+    }}
   ],
-  "relationships": [
-    {
-      "source": "entity_002",
-      "target": "entity_001",
-      "type": "BELONGS_TO",
-      "confidence": 0.95,
-      "reason": "单例模式是设计模式的一种"
-    },
-    {
-      "source": "entity_002",
-      "target": "entity_003",
-      "type": "IS",
-      "confidence": 0.90,
-      "reason": "该内容定义了单例模式"
-    },
-    {
-      "source": "entity_002",
-      "target": "entity_004",
-      "type": "FROM",
-      "confidence": 0.85,
-      "reason": "单例模式在该书中被介绍"
-    }
-  ],
-  "filtered_entities": [],  // 被过滤的无关实体及原因
-  "quality_metrics": {
-    "total_entities_extracted": 4,
-    "valid_entities": 4,
-    "total_relationships": 3,
-    "valid_relationships": 3,
-    "filtering_rate": 0.0
-  }
-}
-```
-
-# 注意事项
-
-- **质量优先于数量**：宁可提取少数高质量实体，也不要包含无关内容
-- **严格过滤**：任何非软件工程领域的实体都应被过滤
-- **关系验证**：所有关系必须恰好是5种类型之一
-- **置信度真实**：给出真实的置信度评分，不要虚高
+  "relations": [
+    {{
+      "source_claim_index": 0,
+      "target_claim_index": 1,
+      "relation_type": "SUPPORTS | CONTRADICTS | CAUSES | COMPARES_WITH | CONDITIONS | PURPOSE",
+      "confidence": 0.0-1.0,
+      "evidence": "支撑此关系的原文片段（可选）"
     }}
   ]
 }}
 ```
-
-# 注意事项
-
-- 只提取明确的、完整的论断，避免提取描述性片段
-- 论断应该是自洽的，不依赖上下文也能理解
-- 如果论断有多个子句，考虑拆分为多个独立论断
-- 关系必须基于文本证据，不要推测
-- 如果文本中没有明确的论断或关系，返回空数组
 
 # 示例
 
@@ -210,4 +106,3 @@
 ```
 
 现在请处理上述文本。
-

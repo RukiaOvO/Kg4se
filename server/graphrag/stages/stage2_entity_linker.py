@@ -75,30 +75,31 @@ class EntityLinker:
     5. 领域过滤：仅保留软件工程领域相关实体
     """
     
-    def __init__(self):
+    def __init__(self, fast_mode: bool = True):
         self.config = get_config()
         self.thresholds = self.config.thresholds.entity_linking
         self.neo4j_graphrag_available = False
+        self.fast_mode = fast_mode
         
-        # 初始化领域过滤器
         self.domain_filter = get_domain_filter()
         logger.info("Domain filter initialized for software engineering domain")
         
-        # 获取阈值配置
         self.accept_threshold = self.thresholds.get("accept_threshold", 0.85)
         self.review_threshold = self.thresholds.get("review_threshold", 0.65)
         self.reject_threshold = self.thresholds.get("reject_threshold", 0.4)
         
-        # 候选生成参数
         self.candidate_cfg = self.thresholds.get("candidate_generation", {})
-        self.bm25_top_k = self.candidate_cfg.get("bm25_top_k", 20)
-        self.vector_top_k = self.candidate_cfg.get("vector_top_k", 20)
-        self.combined_top_k = self.candidate_cfg.get("combined_top_k", 10)
+        if self.fast_mode:
+            self.bm25_top_k = self.candidate_cfg.get("bm25_top_k", 5)
+            self.vector_top_k = self.candidate_cfg.get("vector_top_k", 5)
+            self.combined_top_k = self.candidate_cfg.get("combined_top_k", 3)
+        else:
+            self.bm25_top_k = self.candidate_cfg.get("bm25_top_k", 20)
+            self.vector_top_k = self.candidate_cfg.get("vector_top_k", 20)
+            self.combined_top_k = self.candidate_cfg.get("combined_top_k", 10)
         
-        # 精排权重
         self.ranking_weights = self.thresholds.get("ranking_weights", {})
         
-        # 分类型阈值（Person/Organization 较高，Method/Tool 较低）
         self.type_thresholds = {
             "Person": {"accept": 0.88, "review": 0.70},
             "Organization": {"accept": 0.88, "review": 0.70},
@@ -108,16 +109,17 @@ class EntityLinker:
             "Metric": {"accept": 0.82, "review": 0.63},
         }
         
-        # 在线学习：错误链接模式（从反馈数据中学习）
         self.error_patterns = {
-            "mention_to_concept": {},  # {mention_text: {concept_id: error_count}}
-            "chunk_to_concept": {},    # {chunk_id: {concept_id: error_count}}
+            "mention_to_concept": {},
+            "chunk_to_concept": {},
         }
         
-        # 加载反馈数据（在线学习）
-        self._load_feedback_data()
+        self._embedding_cache = {}
+        self._degree_cache = {}
         
-        # 尝试导入 neo4j-graphrag（作为回退方案）
+        if not self.fast_mode:
+            self._load_feedback_data()
+        
         try:
             from neo4j_graphrag import KnowledgeGraphBuilder
             from neo4j_graphrag.llm import OpenAILLM
@@ -143,7 +145,8 @@ class EntityLinker:
         except ImportError:
             logger.debug("neo4j-graphrag not available, using optimized implementation")
         
-        logger.info("EntityLinker initialized (optimized version)")
+        mode_str = "fast" if self.fast_mode else "full"
+        logger.info(f"EntityLinker initialized ({mode_str} mode, bm25_top_k={self.bm25_top_k}, vector_top_k={self.vector_top_k})")
     
     def _load_feedback_data(self):
         """
@@ -361,7 +364,9 @@ class EntityLinker:
     
     def _extract_mentions(self, text: str) -> List[str]:
         """
-        提取实体提及（简单规则）
+        提取实体提及（改进版）
+        
+        结合关键词词典和模式匹配，确保实体质量
         
         Args:
             text: 输入文本
@@ -371,17 +376,48 @@ class EntityLinker:
         """
         mentions = set()
         
-        # 1. 英文专有名词（大写开头，2+ 字符）
         proper_nouns = re.findall(r'\b([A-Z][a-zA-Z0-9]{2,})\b', text)
         mentions.update(proper_nouns)
         
-        # 2. 中文名词短语（2-5 个字符）
-        chinese_nouns = re.findall(r'[\u4e00-\u9fff]{2,5}', text)
-        mentions.update(chinese_nouns)
+        software_engineering_keywords = [
+            "软件工程", "软件开发", "软件测试", "软件维护", "需求分析", "系统设计",
+            "面向对象", "设计模式", "敏捷开发", "瀑布模型", "迭代开发", "持续集成",
+            "单元测试", "集成测试", "系统测试", "验收测试", "回归测试", "代码审查",
+            "版本控制", "配置管理", "项目管理", "质量保证", "软件架构", "微服务",
+            "分布式系统", "数据库", "接口设计", "模块化", "组件化", "重构",
+            "软件危机", "软件过程", "软件产品", "专业化开发", "结构化编程",
+            "信息隐藏", "抽象", "封装", "继承", "多态", "IEEE", "ISO", "UML",
+            "Scrum", "Kanban", "DevOps", "CI/CD", "Git", "SVN", "Jenkins",
+            "软件密集型系统", "系统文档", "用户文档", "程序源代码", "配置文件",
+            "软件工程师", "程序员", "测试工程师", "架构师", "产品经理",
+            "需求文档", "设计文档", "测试用例", "代码质量", "技术债务",
+            "软件生命周期", "维护成本", "开发效率", "软件可靠性", "软件安全性"
+        ]
         
-        # 过滤停用词
-        stopwords = {'这个', '那个', '这些', '那些', '它们', '他们', '我们', '你们', '它们', '它们'}
+        for keyword in software_engineering_keywords:
+            if keyword in text:
+                mentions.add(keyword)
+        
+        chinese_phrases = re.findall(r'[\u4e00-\u9fff]{4,10}(?:软件|系统|工程|方法|技术|过程|模型|模式|测试|设计|开发|维护|管理|文档|代码|架构|需求|质量)', text)
+        mentions.update(chinese_phrases)
+        
+        chinese_phrases2 = re.findall(r'(?:软件|系统|工程|方法|技术|过程|模型|模式|测试|设计|开发|维护|管理|文档|代码|架构|需求|质量)[\u4e00-\u9fff]{2,8}', text)
+        mentions.update(chinese_phrases2)
+        
+        stopwords = {
+            '这个', '那个', '这些', '那些', '它们', '他们', '我们', '你们', '它们',
+            '可以', '可能', '如果', '因为', '所以', '但是', '而且', '或者', '以及',
+            '进行', '通过', '使用', '包括', '例如', '比如', '一种', '一个', '一些',
+            '这样', '那样', '如何', '什么', '怎么', '为什么', '哪里', '哪个', '多少',
+            '已经', '正在', '将要', '应该', '需要', '必须', '能够', '应该', '可能',
+            '第一', '第二', '第三', '最后', '首先', '其次', '然后', '接着', '因此',
+            '快地', '地构', '和的', '都跟', '跟图', '密们', '们构', '更大', '大更',
+            '除开', '开外', '外还', '还有', '其他', '一种', '一些', '许多', '多个',
+            '各种', '各个', '每个', '某个', '某些', '所有', '全部', '部分'
+        }
+        
         mentions = {m for m in mentions if m not in stopwords}
+        mentions = {m for m in mentions if len(m) >= 3 and len(m) <= 20}
         
         return list(mentions)
     
@@ -500,9 +536,8 @@ class EntityLinker:
             候选列表
         """
         candidates = []
-        candidate_ids = set()  # 去重
+        candidate_ids = set()
         
-        # 1. 别名词典召回（复用 stage1 的 alias_map）
         if mention in alias_map:
             canonical = alias_map[mention]
             candidates_from_alias = self._retrieve_by_name_or_alias(canonical)
@@ -511,9 +546,7 @@ class EntityLinker:
                     cand.match_type = "alias"
                     candidates.append(cand)
                     candidate_ids.add(cand.concept_id)
-            logger.debug(f"[Stage2] 别名词典召回: '{mention}' -> '{canonical}', 找到 {len(candidates_from_alias)} 个候选")
         
-        # 2. 精确匹配召回
         exact_candidates = self._retrieve_by_name_or_alias(mention)
         for cand in exact_candidates:
             if cand.concept_id not in candidate_ids:
@@ -521,43 +554,36 @@ class EntityLinker:
                 candidates.append(cand)
                 candidate_ids.add(cand.concept_id)
         
-        # 3. BM25 召回（简化版：使用 Neo4j 的文本匹配）
-        bm25_candidates = self._retrieve_by_bm25(mention, limit=self.bm25_top_k)
-        for cand in bm25_candidates:
-            if cand.concept_id not in candidate_ids:
-                cand.match_type = "bm25"
-                candidates.append(cand)
-                candidate_ids.add(cand.concept_id)
-        
-        # 4. 向量检索
-        # 优先使用 mention 的 embedding（更精确），如果没有则使用 chunk.embedding
-        mention_embedding = None
-        if settings.enable_vector_search:
-            try:
-                # 为 mention 生成 embedding（更精确的匹配）
-                mention_embedding = get_embedding(mention, model=settings.embedding_model)
-                # 检查是否为有效向量（非全零）
-                if mention_embedding and any(x != 0.0 for x in mention_embedding):
-                    logger.debug(f"[Stage2] 为 mention '{mention}' 生成 embedding")
-                else:
-                    # 如果生成失败，尝试使用 chunk.embedding
-                    mention_embedding = chunk.embedding
-                    if mention_embedding:
-                        logger.debug(f"[Stage2] 使用 chunk.embedding 进行向量检索")
-            except Exception as e:
-                logger.warning(f"[Stage2] 生成 mention embedding 失败: {e}，尝试使用 chunk.embedding")
-                mention_embedding = chunk.embedding
-        
-        if mention_embedding:
-            vector_candidates = self._retrieve_by_vector(mention, mention_embedding, limit=self.vector_top_k)
-            for cand in vector_candidates:
+        if not self.fast_mode:
+            bm25_candidates = self._retrieve_by_bm25(mention, limit=self.bm25_top_k)
+            for cand in bm25_candidates:
                 if cand.concept_id not in candidate_ids:
-                    cand.match_type = "vector"
+                    cand.match_type = "bm25"
                     candidates.append(cand)
                     candidate_ids.add(cand.concept_id)
         
+        if not self.fast_mode and settings.enable_vector_search:
+            mention_embedding = None
+            try:
+                mention_embedding = get_embedding(mention, model=settings.embedding_model)
+                if mention_embedding and all(x == 0.0 for x in mention_embedding):
+                    mention_embedding = None
+            except Exception as e:
+                logger.debug(f"[Stage2] 生成 mention embedding 失败: {e}")
+            
+            if not mention_embedding and chunk.embedding:
+                mention_embedding = chunk.embedding
+            
+            if mention_embedding:
+                vector_candidates = self._retrieve_by_vector(mention, mention_embedding, limit=self.vector_top_k)
+                for cand in vector_candidates:
+                    if cand.concept_id not in candidate_ids:
+                        cand.match_type = "vector"
+                        candidates.append(cand)
+                        candidate_ids.add(cand.concept_id)
+        
         logger.debug(f"[Stage2] 多路召回完成: '{mention}' 共找到 {len(candidates)} 个候选")
-        return candidates[:self.combined_top_k]  # 限制总数
+        return candidates[:self.combined_top_k]
     
     def _retrieve_by_name_or_alias(self, name: str) -> List[EntityCandidate]:
         """
@@ -781,26 +807,42 @@ class EntityLinker:
         )
         
         for candidate in candidates:
-            # 计算 6 类特征（新增图一致性特征）
-            features = {
-                "lexical_similarity": self._compute_lexical_similarity(mention, candidate.concept_name, candidate.aliases),
-                "semantic_similarity": self._compute_semantic_similarity(mention, candidate, chunk),
-                "context_match": self._compute_context_match(mention, candidate, text, chunk),
-                "type_consistency": self._compute_type_consistency(candidate),
-                "prior_frequency": self._compute_prior_frequency(candidate),
-                "graph_consistency": self._compute_graph_consistency(candidate, chunk)
-            }
-            candidate.features = features
+            if self.fast_mode:
+                features = {
+                    "lexical_similarity": self._compute_lexical_similarity(mention, candidate.concept_name, candidate.aliases),
+                    "semantic_similarity": self._compute_semantic_similarity_fast(mention, candidate, chunk),
+                    "context_match": 0.5,
+                    "type_consistency": self._compute_type_consistency(candidate),
+                    "prior_frequency": 0.5,
+                    "graph_consistency": 0.5
+                }
+                weights = {
+                    "lexical_similarity": 0.35,
+                    "semantic_similarity": 0.45,
+                    "context_match": 0.0,
+                    "type_consistency": 0.2,
+                    "prior_frequency": 0.0,
+                    "graph_consistency": 0.0
+                }
+            else:
+                features = {
+                    "lexical_similarity": self._compute_lexical_similarity(mention, candidate.concept_name, candidate.aliases),
+                    "semantic_similarity": self._compute_semantic_similarity(mention, candidate, chunk),
+                    "context_match": self._compute_context_match(mention, candidate, text, chunk),
+                    "type_consistency": self._compute_type_consistency(candidate),
+                    "prior_frequency": self._compute_prior_frequency(candidate),
+                    "graph_consistency": self._compute_graph_consistency(candidate, chunk)
+                }
+                weights = {
+                    "lexical_similarity": self.ranking_weights.get("lexical_similarity", 0.15),
+                    "semantic_similarity": self.ranking_weights.get("semantic_similarity", 0.35),
+                    "context_match": self.ranking_weights.get("context_match", 0.15),
+                    "type_consistency": self.ranking_weights.get("type_consistency", 0.1),
+                    "prior_frequency": self.ranking_weights.get("prior_frequency", 0.1),
+                    "graph_consistency": self.ranking_weights.get("graph_consistency", 0.15)
+                }
             
-            # 加权求和得到总分
-            weights = {
-                "lexical_similarity": self.ranking_weights.get("lexical_similarity", 0.15),
-                "semantic_similarity": self.ranking_weights.get("semantic_similarity", 0.35),
-                "context_match": self.ranking_weights.get("context_match", 0.15),
-                "type_consistency": self.ranking_weights.get("type_consistency", 0.1),
-                "prior_frequency": self.ranking_weights.get("prior_frequency", 0.1),
-                "graph_consistency": self.ranking_weights.get("graph_consistency", 0.15)
-            }
+            candidate.features = features
             
             score = (
                 features["lexical_similarity"] * weights["lexical_similarity"] +
@@ -811,27 +853,16 @@ class EntityLinker:
                 features["graph_consistency"] * weights["graph_consistency"]
             )
             
-            # 应用反馈学习：根据错误链接模式调整分数
-            penalty = self._apply_feedback_learning(candidate, mention, chunk.id)
-            score_before_penalty = score
-            score = score * (1.0 - penalty)
+            if not self.fast_mode:
+                penalty = self._apply_feedback_learning(candidate, mention, chunk.id)
+                score = score * (1.0 - penalty)
             
             candidate.score = score
             
             logger.debug(
-                f"[Stage2] 候选 '{candidate.concept_name}' (id={candidate.concept_id}):\n"
-                f"  特征: lexical={features['lexical_similarity']:.3f}, "
-                f"semantic={features['semantic_similarity']:.3f}, "
-                f"context={features['context_match']:.3f}, "
-                f"type={features['type_consistency']:.3f}, "
-                f"frequency={features['prior_frequency']:.3f}, "
-                f"graph={features['graph_consistency']:.3f}\n"
-                f"  权重: {weights}\n"
-                f"  得分: {score_before_penalty:.3f} -> {score:.3f} "
-                f"(penalty={penalty:.3f}, match_type={candidate.match_type})"
+                f"[Stage2] 候选 '{candidate.concept_name}': score={score:.3f}, match_type={candidate.match_type}"
             )
         
-        # 按分数降序排序
         ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
         
         top3_scores = [f"{c.concept_name}:{c.score:.3f}" for c in ranked[:3]]
@@ -944,7 +975,43 @@ class EntityLinker:
             if vector_score >= 0:
                 return min(vector_score, 1.0)
         
-        return 0.3  # 默认低分
+        return 0.3
+    
+    def _compute_semantic_similarity_fast(self, mention: str, candidate: EntityCandidate, chunk: ChunkMetadata) -> float:
+        """
+        快速计算语义相似度（不查询数据库）
+        
+        Args:
+            mention: 提及文本
+            candidate: 候选
+            chunk: Chunk 元数据
+        
+        Returns:
+            相似度分数 [0, 1]
+        """
+        if candidate.features and "vector_similarity" in candidate.features:
+            vector_score = candidate.features["vector_similarity"]
+            if vector_score >= 0:
+                return min(vector_score, 1.0)
+        
+        if candidate.match_type == "exact":
+            return 0.95
+        elif candidate.match_type == "alias":
+            return 0.9
+        elif candidate.match_type == "bm25":
+            return 0.7
+        elif candidate.match_type == "vector":
+            return 0.8
+        
+        mention_lower = mention.lower()
+        concept_lower = candidate.concept_name.lower()
+        
+        if mention_lower == concept_lower:
+            return 0.95
+        if mention_lower in concept_lower or concept_lower in mention_lower:
+            return 0.8
+        
+        return 0.5
     
     def _compute_context_match(self, mention: str, candidate: EntityCandidate, text: str, chunk: ChunkMetadata) -> float:
         """

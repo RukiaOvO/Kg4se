@@ -1,7 +1,7 @@
 """
 GraphRAG 构建阶段模块
 
-8 个阶段的算法实现
+8 个阶段的算法实现 + Pipeline流水线
 """
 
 from .stage0_chunker import SemanticChunker
@@ -13,6 +13,14 @@ from .stage5_predicate_governor import PredicateGovernor
 from .stage6_graph_service import GraphService
 from .stage7_query_service import QueryService
 from .stage8_metrics_service import MetricsService
+from .pipeline import (
+    GraphRAGPipeline,
+    PipelineConfig,
+    PipelineResult,
+    PipelineStage,
+    ChunkConverter,
+    create_pipeline
+)
 
 __all__ = [
     "SemanticChunker",
@@ -23,6 +31,12 @@ __all__ = [
     "PredicateGovernor",
     "GraphService",
     "QueryService",
-    "MetricsService"
+    "MetricsService",
+    "GraphRAGPipeline",
+    "PipelineConfig",
+    "PipelineResult",
+    "PipelineStage",
+    "ChunkConverter",
+    "create_pipeline"
 ]
 
