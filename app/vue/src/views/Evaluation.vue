@@ -4,129 +4,12 @@
     <div class="page-header">
       <div class="header-content">
         <h1 class="page-title">质量分析</h1>
-        <p class="page-subtitle">Knowledge Graph & LLM Answer Quality Analysis</p>
+        <p class="page-subtitle">LLM Answer Quality Analysis</p>
       </div>
     </div>
 
     <!-- Tab Switch -->
-    <n-tabs v-model:value="activeTab" type="line" class="tab-container">
-      <n-tab-pane name="graph" tab="知识图谱质量分析">
-        <div class="tab-content">
-          <div class="analysis-card">
-            <div class="card-header">
-              <n-icon size="20"><bar-chart-outline /></n-icon>
-              <h3>图谱质量评估</h3>
-              <n-button size="small" type="primary" @click="evaluateGraph" :loading="loadingGraph">
-                <template #icon>
-                  <n-icon><refresh-outline /></n-icon>
-                </template>
-                刷新评估
-              </n-button>
-            </div>
-
-            <div v-if="graphQuality" class="metrics-grid">
-              <!-- 结构质量 -->
-              <div class="metric-section">
-                <h4>结构质量</h4>
-                <div class="metric-items">
-                  <div class="metric-item">
-                    <span class="metric-label">节点数</span>
-                    <n-number-animation :from="0" :to="graphQuality.structural_quality.node_count" :duration="1000" class="metric-value" />
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">边数</span>
-                    <n-number-animation :from="0" :to="graphQuality.structural_quality.edge_count" :duration="1000" class="metric-value" />
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">平均度数</span>
-                    <span class="metric-value">{{ graphQuality.structural_quality.avg_degree }}</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">模块化度</span>
-                    <span class="metric-value">{{ graphQuality.structural_quality.modularity }}</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">密度</span>
-                    <span class="metric-value">{{ (graphQuality.structural_quality.density * 100).toFixed(2) }}%</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">连通分量</span>
-                    <span class="metric-value">{{ graphQuality.structural_quality.connected_components }}</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 内容质量 -->
-              <div class="metric-section">
-                <h4>内容质量</h4>
-                <div class="metric-items">
-                  <div class="metric-item">
-                    <span class="metric-label">样本数</span>
-                    <span class="metric-value">{{ graphQuality.content_quality.sample_size }}</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">有效率</span>
-                    <span class="metric-value">{{ (graphQuality.content_quality.valid_ratio * 100).toFixed(2) }}%</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">平均置信度</span>
-                    <span class="metric-value">{{ graphQuality.content_quality.avg_confidence.toFixed(2) }}</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">谓词多样性</span>
-                    <span class="metric-value">{{ graphQuality.content_quality.predicate_diversity }}</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">规范化率</span>
-                    <span class="metric-value">{{ (graphQuality.content_quality.predicate_normalized_ratio * 100).toFixed(2) }}%</span>
-                  </div>
-                </div>
-              </div>
-
-              <!-- 构建效率 -->
-              <div class="metric-section">
-                <h4>构建效率</h4>
-                <div class="metric-items">
-                  <div class="metric-item">
-                    <span class="metric-label">处理文档数</span>
-                    <span class="metric-value">{{ graphQuality.construction_efficiency.documents_processed }}</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">总耗时</span>
-                    <span class="metric-value">{{ graphQuality.construction_efficiency.total_build_time.toFixed(2) }}s</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">Token消耗</span>
-                    <span class="metric-value">{{ graphQuality.construction_efficiency.tokens_consumed.toLocaleString() }}</span>
-                  </div>
-                  <div class="metric-item">
-                    <span class="metric-label">吞吐量</span>
-                    <span class="metric-value">{{ graphQuality.construction_efficiency.throughput.toFixed(2) }} doc/s</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- 综合评分 -->
-            <div v-if="graphQuality" class="overall-score">
-              <div class="score-circle">
-                <n-number-animation :from="0" :to="(graphQuality.overall_score * 100)" :duration="1500" :precision="0" class="score-value" />
-                <span class="score-label">综合评分</span>
-              </div>
-              <div class="recommendations">
-                <h4>优化建议</h4>
-                <ul>
-                  <li v-for="(rec, idx) in graphQuality.recommendations" :key="idx">{{ rec }}</li>
-                </ul>
-              </div>
-            </div>
-
-            <n-empty v-else-if="!loadingGraph" description="点击刷新评估开始分析图谱质量" />
-            <n-spin v-else size="large" />
-          </div>
-        </div>
-      </n-tab-pane>
-
+    <n-tabs v-model:value="activeTab" type="line" class="tab-container" :default-value="'answer'">
       <n-tab-pane name="answer" tab="LLM回答质量分析">
         <div class="tab-content">
           <div class="analysis-card">
@@ -262,29 +145,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { NButton, NIcon, NInput, NTabs, NTabPane, NNumberAnimation, NSpin, NEmpty, NTag } from 'naive-ui'
-import { BarChartOutline, RefreshOutline, DocumentTextOutline, SendOutline } from '@vicons/ionicons5'
-import { evaluateGraphQuality, evaluateAnswerQuality } from '@/api/services'
+import { ref } from 'vue'
+import { NButton, NIcon, NInput, NTabs, NTabPane, NSpin, NEmpty, NTag } from 'naive-ui'
+import { DocumentTextOutline, SendOutline } from '@vicons/ionicons5'
+import { evaluateAnswerQuality } from '@/api/services'
 
-const activeTab = ref('graph')
-const loadingGraph = ref(false)
+const activeTab = ref('answer')
 const loadingAnswer = ref(false)
-const graphQuality = ref(null)
 const answerEvaluation = ref(null)
 const question = ref('')
-
-const evaluateGraph = async () => {
-  loadingGraph.value = true
-  try {
-    const data = await evaluateGraphQuality()
-    graphQuality.value = data
-  } catch (error) {
-    console.error('图谱质量评估失败:', error)
-  } finally {
-    loadingGraph.value = false
-  }
-}
 
 const evaluateAnswer = async () => {
   if (!question.value.trim()) return
@@ -311,10 +180,6 @@ const getBestMethod = () => {
     return 'LLM'
   }
 }
-
-onMounted(() => {
-  evaluateGraph()
-})
 </script>
 
 <style lang="scss" scoped>

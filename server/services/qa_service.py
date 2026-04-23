@@ -24,62 +24,240 @@ class QAService:
             
             query_embedding = get_embedding(question)
             
-            query = """
-                CALL db.index.vector.queryNodes('concept_embeddings', $topK, $queryVector)
-                YIELD node, score
-                RETURN node.definition AS text, node.name AS source, score AS similarity
-                ORDER BY score DESC
-                LIMIT $topK
-            """
+            if not query_embedding or all(v == 0.0 for v in query_embedding):
+                logger.debug("[QA服务] 向量化失败，使用关键词匹配")
+                return self._keyword_fallback(question, top_k)
             
-            params = {
-                "topK": top_k,
-                "queryVector": query_embedding
-            }
+            all_results = []
             
+            # 1. 查询 Claim 向量索引（优先，包含实际论断内容）
             try:
-                results = neo4j_client.execute_query(query, params)
-                
-                contexts = []
-                for record in results:
-                    contexts.append({
-                        "text": record.get("text", ""),
-                        "source": record.get("source", ""),
-                        "similarity": record.get("similarity", 0.0)
-                    })
-                
-                logger.debug(f"[QA服务] Neo4j向量检索返回 {len(contexts)} 条结果")
-                
-                if contexts:
-                    return contexts
+                claim_query = """
+                    CALL db.index.vector.queryNodes('claim_embeddings', $topK, $queryVector)
+                    YIELD node, score
+                    WHERE node.embedding IS NOT NULL AND node.text IS NOT NULL
+                    RETURN 
+                        node.text AS text, 
+                        'Claim:' + node.id AS source, 
+                        score AS similarity,
+                        node.claim_type AS type
+                    ORDER BY score DESC
+                    LIMIT $topK
+                """
+                claim_params = {
+                    "topK": top_k,
+                    "queryVector": query_embedding
+                }
+                claim_results = neo4j_client.execute_query(claim_query, claim_params)
+                for record in claim_results:
+                    text = record.get("text", "")
+                    if text and text.strip() and len(text.strip()) > 20:  # 过滤过短内容
+                        all_results.append({
+                            "text": text,
+                            "source": record.get("source", ""),
+                            "similarity": record.get("similarity", 0.0),
+                            "type": record.get("type", "claim")
+                        })
+                logger.debug(f"[QA服务] Claim向量检索返回 {len(claim_results)} 条结果")
             except Exception as e:
-                logger.debug(f"[QA服务] 向量索引查询失败，使用关键词匹配: {e}")
+                logger.debug(f"[QA服务] Claim向量索引查询失败: {e}")
             
-            fallback_query = """
-                MATCH (n:Concept)
-                WHERE n.definition IS NOT NULL AND n.definition <> ''
-                RETURN n.definition AS text, n.name AS source, 0.5 AS similarity
-                LIMIT $topK
-            """
+            # 2. 查询 Chunk 向量索引（包含文档片段内容）
+            try:
+                chunk_query = """
+                    CALL db.index.vector.queryNodes('chunk_embeddings', $topK, $queryVector)
+                    YIELD node, score
+                    WHERE node.embedding IS NOT NULL AND node.text IS NOT NULL
+                    RETURN 
+                        node.text AS text, 
+                        'Chunk:' + coalesce(node.section_path, node.id) AS source, 
+                        score AS similarity,
+                        'chunk' AS type
+                    ORDER BY score DESC
+                    LIMIT $topK
+                """
+                chunk_params = {
+                    "topK": top_k,
+                    "queryVector": query_embedding
+                }
+                chunk_results = neo4j_client.execute_query(chunk_query, chunk_params)
+                for record in chunk_results:
+                    text = record.get("text", "")
+                    if text and text.strip() and len(text.strip()) > 50:  # 过滤过短内容
+                        all_results.append({
+                            "text": text,
+                            "source": record.get("source", ""),
+                            "similarity": record.get("similarity", 0.0),
+                            "type": record.get("type", "chunk")
+                        })
+                logger.debug(f"[QA服务] Chunk向量检索返回 {len(chunk_results)} 条结果")
+            except Exception as e:
+                logger.debug(f"[QA服务] Chunk向量索引查询失败: {e}")
             
-            fallback_params = {"topK": top_k}
-            fallback_results = neo4j_client.execute_query(fallback_query, fallback_params)
+            # 3. 查询 Concept 向量索引（作为补充，只返回有description/concept_content的）
+            try:
+                concept_query = """
+                    CALL db.index.vector.queryNodes('concept_embeddings', $topK, $queryVector)
+                    YIELD node, score
+                    WHERE node.embedding IS NOT NULL
+                    RETURN 
+                        node.name AS name,
+                        node.description AS description,
+                        node.definition AS definition,
+                        score AS similarity
+                    ORDER BY score DESC
+                    LIMIT $topK
+                """
+                concept_params = {
+                    "topK": top_k,
+                    "queryVector": query_embedding
+                }
+                concept_results = neo4j_client.execute_query(concept_query, concept_params)
+                for record in concept_results:
+                    name = record.get("name", "")
+                    description = record.get("description", "")
+                    definition = record.get("definition", "")
+                    
+                    # 优先使用description，其次definition，都不存在则跳过此Concept
+                    if description and description.strip():
+                        text = description.strip()
+                    elif definition and definition.strip():
+                        text = definition.strip()
+                    else:
+                        # Concept没有description/definition，查询其关联的Claim/Chunk作为补充
+                        logger.debug(f"[QA服务] Concept '{name}' 无description，尝试查询关联内容")
+                        text = self._get_concept_content(name)
+                    
+                    if text and text.strip() and len(text.strip()) > 20:  # 过滤过短内容
+                        all_results.append({
+                            "text": text,
+                            "source": f"Concept:{name}",
+                            "similarity": record.get("similarity", 0.0),
+                            "type": "concept"
+                        })
+                logger.debug(f"[QA服务] Concept向量检索返回 {len(concept_results)} 条结果")
+            except Exception as e:
+                logger.debug(f"[QA服务] Concept向量索引查询失败: {e}")
             
-            contexts = []
-            for record in fallback_results:
-                contexts.append({
-                    "text": record.get("text", ""),
-                    "source": record.get("source", ""),
-                    "similarity": record.get("similarity", 0.0)
-                })
+            # 4. 去重并按相似度排序
+            seen_texts = set()
+            unique_results = []
+            for result in all_results:
+                # 使用前100字符作为去重key
+                text_key = result["text"][:100].strip()
+                if text_key and text_key not in seen_texts:
+                    seen_texts.add(text_key)
+                    unique_results.append(result)
             
-            logger.debug(f"[QA服务] Neo4j关键词检索返回 {len(contexts)} 条结果")
-            return contexts
+            # 按相似度降序排序，返回 top_k
+            unique_results.sort(key=lambda x: x["similarity"], reverse=True)
+            final_results = unique_results[:top_k]
+            
+            logger.debug(f"[QA服务] 向量检索总计返回 {len(final_results)} 条结果")
+            
+            # 打印实际返回的内容用于调试
+            for i, r in enumerate(final_results[:3]):
+                logger.debug(f"[QA服务] 结果{i+1}: type={r['type']}, similarity={r['similarity']:.4f}, text_len={len(r['text'])}, text_preview={r['text'][:80]}...")
+            
+            if final_results:
+                return final_results
+            
+            # 回退到关键词匹配
+            return self._keyword_fallback(question, top_k)
             
         except Exception as e:
             logger.error(f"[QA服务] 向量数据库查询失败: {e}")
             return []
+    
+    def _get_concept_content(self, concept_name: str) -> str:
+        """当Concept没有description时，查询其关联的Claim或Chunk作为内容"""
+        try:
+            # 查询Concept关联的Claim（优先）
+            claim_query = """
+                MATCH (c:Concept {name: $name})<-[:MENTIONS]-(:Chunk)-[:CONTAINS_CLAIM]->(cl:Claim)
+                RETURN cl.text AS text, cl.confidence AS confidence
+                ORDER BY cl.confidence DESC
+                LIMIT 3
+            """
+            claim_results = neo4j_client.execute_query(claim_query, {"name": concept_name})
+            
+            if claim_results:
+                claims = []
+                for record in claim_results:
+                    text = record.get("text", "")
+                    if text and text.strip():
+                        claims.append(text.strip())
+                if claims:
+                    content = "\n\n".join(claims)
+                    logger.debug(f"[QA服务] 从Concept关联Claim获取内容: {len(content)} 字符")
+                    return content
+            
+            # 查询Concept关联的Chunk
+            chunk_query = """
+                MATCH (c:Concept {name: $name})<-[:MENTIONS]-(ch:Chunk)
+                RETURN ch.text AS text
+                LIMIT 2
+            """
+            chunk_results = neo4j_client.execute_query(chunk_query, {"name": concept_name})
+            
+            if chunk_results:
+                chunks = []
+                for record in chunk_results:
+                    text = record.get("text", "")
+                    if text and text.strip() and len(text.strip()) > 50:
+                        chunks.append(text.strip())
+                if chunks:
+                    content = "\n\n".join(chunks)
+                    logger.debug(f"[QA服务] 从Concept关联Chunk获取内容: {len(content)} 字符")
+                    return content
+            
+            # 如果都没有，返回name（但不推荐，因为信息太少）
+            logger.debug(f"[QA服务] Concept '{concept_name}' 无关联内容")
+            return ""
+            
+        except Exception as e:
+            logger.debug(f"[QA服务] 查询Concept关联内容失败: {e}")
+            return ""
+    
+    def _keyword_fallback(self, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
+        """基于关键词的fallback检索方法"""
+        keywords = self._extract_keywords(question)
         
+        if not keywords:
+            logger.debug("[QA服务] 无可用关键词，跳过fallback查询")
+            return []
+        
+        # 基于关键词匹配 name, description, aliases
+        fallback_query = """
+            MATCH (n:Concept)
+            WHERE n.description IS NOT NULL AND n.description <> ''
+            AND (
+                ANY(keyword IN $keywords WHERE toLower(n.name) CONTAINS toLower(keyword))
+                OR ANY(keyword IN $keywords WHERE toLower(n.description) CONTAINS toLower(keyword))
+                OR (n.aliases IS NOT NULL AND ANY(keyword IN $keywords WHERE 
+                    ANY(alias IN n.aliases WHERE toLower(alias) CONTAINS toLower(keyword))
+                ))
+            )
+            RETURN n.description AS text, n.name AS source, 0.5 AS similarity
+            LIMIT $topK
+        """
+        fallback_params = {"topK": top_k, "keywords": keywords}
+        
+        fallback_results = neo4j_client.execute_query(fallback_query, fallback_params)
+        
+        contexts = []
+        for record in fallback_results:
+            text = record.get("text", "")
+            if text and text.strip():
+                contexts.append({
+                    "text": text,
+                    "source": record.get("source", ""),
+                    "similarity": record.get("similarity", 0.0)
+                })
+        
+        logger.debug(f"[QA服务] Neo4j关键词检索返回 {len(contexts)} 条结果")
+        return contexts
+    
     def _initialize_ai_client(self):
         """Initialize AI client with configured provider."""
         try:
@@ -96,7 +274,7 @@ class QAService:
             logger.error(f"[QA服务] AI客户端初始化失败: {e}")
             return None
     
-    def query_knowledge_graph(self, question: str, limit: int = 5) -> Dict[str, Any]:
+    def query_knowledge_graph(self, question: str, limit: int = 8) -> Dict[str, Any]:
         """
         Query knowledge graph to find relevant entities and relationships.
         
@@ -341,7 +519,7 @@ class QAService:
             
             if entity.get("relationships"):
                 rel_strs = []
-                for rel in entity.get("relationships", [])[:5]:  # 最多5个关系
+                for rel in entity.get("relationships", [])[:8]:  # 最多8个关系（从5增加到8）
                     rel_str = f"{rel.get('type', 'RELATED')} {rel.get('target_name', 'Unknown')}"
                     rel_strs.append(rel_str)
                 if rel_strs:
@@ -349,8 +527,8 @@ class QAService:
             
             if entity.get("claims") and isinstance(entity["claims"], list) and entity["claims"]:
                 claim_strs = []
-                for claim in entity["claims"][:3]:  # 最多3个论断
-                    claim_text = claim.get("claim_text", "")[:150]
+                for claim in entity["claims"][:5]:  # 最多5个论断（从3增加到5）
+                    claim_text = claim.get("claim_text", "")[:200]  # 增加到200字符（从150增加）
                     claim_type = claim.get("claim_type", "fact")
                     confidence = claim.get("confidence", 0.0)
                     if claim_text:
@@ -361,7 +539,7 @@ class QAService:
             
             context_parts.append(entity_str)
         
-        return "\n\n".join(context_parts[:10])  # 最多10个实体
+        return "\n\n".join(context_parts[:12])  # 最多12个实体（从10增加到12）
     
     def answer_question(
         self,
@@ -434,7 +612,6 @@ class QAService:
             
             logger.info(f"[QA服务] 用户提问: {question[:100]}...")
             logger.debug(f"[QA服务] 历史对话数: {len(conversation_history) if conversation_history else 0}")
-            logger.debug(f"[QA服务] 完整Prompt:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
             
             answer = self.ai_client.chat_completion(
                 messages=messages,
@@ -446,7 +623,7 @@ class QAService:
                 "success": True,
                 "answer": answer,
                 "used_context": used_kg,
-                "context_snippet": kg_context[:300] if kg_context else None,
+                "context_snippet": kg_context,  # 返回完整的参考信息
                 "error": None
             }
         
@@ -511,9 +688,10 @@ class QAService:
             
             vector_results = self._query_vector_store(question)
             if vector_results:
+                # 显示所有检索结果，但限制每条内容的长度
                 vector_context = "\n\n".join([
-                    f"【文档片段】\n相似度: {r['similarity']:.4f}\n内容: {r['text'][:500]}"
-                    for r in vector_results[:3]
+                    f"【文档片段{i+1}】\n类型: {r.get('type', 'unknown')}\n相似度: {r['similarity']:.4f}\n来源: {r.get('source', '')}\n内容: {r['text'][:800]}"
+                    for i, r in enumerate(vector_results)
                 ])
                 used_vector = True
             
@@ -546,7 +724,6 @@ class QAService:
             
             logger.info(f"[QA服务] 用户提问: {question[:100]}...")
             logger.debug(f"[QA服务] 历史对话数: {len(conversation_history) if conversation_history else 0}")
-            logger.debug(f"[QA服务] 完整Prompt:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
             
             answer = self.ai_client.chat_completion(
                 messages=messages,
@@ -558,7 +735,7 @@ class QAService:
                 "success": True,
                 "answer": answer,
                 "used_context": used_vector,
-                "context_snippet": vector_context[:300] if vector_context else None,
+                "context_snippet": vector_context,  # 返回完整的参考信息
                 "error": None
             }
         
@@ -615,7 +792,6 @@ class QAService:
             
             logger.info(f"[QA服务] 用户提问: {question[:100]}...")
             logger.debug(f"[QA服务] 历史对话数: {len(conversation_history) if conversation_history else 0}")
-            logger.debug(f"[QA服务] 完整Prompt:\n{json.dumps(messages, ensure_ascii=False, indent=2)}")
             
             answer = self.ai_client.chat_completion(
                 messages=messages,

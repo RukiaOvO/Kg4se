@@ -575,6 +575,7 @@ class GraphService:
             c.description = CASE WHEN $description IS NOT NULL THEN $description ELSE c.description END,
             c.domain = CASE WHEN $domain IS NOT NULL THEN $domain ELSE c.domain END,
             c.importance = CASE WHEN $importance IS NOT NULL AND $importance > c.importance THEN $importance ELSE c.importance END,
+            c.embedding = CASE WHEN $embedding IS NOT NULL THEN $embedding ELSE c.embedding END,
             c.frequency = coalesce(c.frequency, 0) + 1,
             c.updated_at = datetime()
         """
@@ -601,7 +602,6 @@ class GraphService:
     def store_claim(self, claim: Dict[str, Any]):
         """
         存储 Claim 节点
-        
         Args:
             claim: Claim 数据
         """
@@ -621,6 +621,7 @@ class GraphService:
             cl.certainty = $certainty,
             cl.evidence_span = $evidence_span,
             cl.section_path = $section_path,
+            cl.embedding = $embedding,
             cl.build_version = $build_version,
             cl.updated_at = datetime(),
             cl.created_at = CASE WHEN cl.created_at IS NULL THEN datetime() ELSE cl.created_at END
@@ -639,6 +640,7 @@ class GraphService:
             "certainty": claim.get("certainty"),
             "evidence_span": claim.get("evidence_span"),
             "section_path": claim.get("section_path"),
+            "embedding": claim.get("embedding"),
             "build_version": claim.get("build_version")
         }
         

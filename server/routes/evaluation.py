@@ -3,7 +3,6 @@ from typing import Dict, Any, Optional, List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from evaluation import (
-    GraphQualityEvaluator,
     PointwiseEvaluator,
     PairwiseEvaluator,
     EvaluationPipeline
@@ -63,30 +62,6 @@ class PairwiseCompareResponse(BaseModel):
     success: bool
     question: str
     comparison: Dict[str, Any]
-
-
-@router.get("/graph", response_model=Dict[str, Any])
-async def evaluate_graph_quality():
-    """
-    Evaluate the quality of the knowledge graph.
-    
-    Returns:
-        Graph quality metrics including structural quality, content quality, 
-        construction efficiency, and overall score.
-    """
-    try:
-        evaluator = GraphQualityEvaluator(neo4j_client)
-        result = evaluator.evaluate()
-        return result
-    except Exception as e:
-        import traceback
-        error_details = traceback.format_exc()
-        with open("evaluation_error.log", "w", encoding="utf-8") as f:
-            f.write(f"错误: {e}\n")
-            f.write(f"详细错误:\n{error_details}")
-        logger.error(f"[评估服务] 图谱质量评估失败: {e}")
-        logger.debug(f"详细错误: {error_details}")
-        raise HTTPException(status_code=500, detail=f"图谱质量评估失败: {str(e)}")
 
 
 @router.post("/answer", response_model=AnswerEvaluationResponse)
@@ -308,6 +283,5 @@ async def health_check():
     """Check if evaluation service is available."""
     return {
         "status": "healthy",
-        "has_qa_service": qa_service is not None,
-        "neo4j_connected": neo4j_client.driver is not None
+        "has_qa_service": qa_service is not None
     }

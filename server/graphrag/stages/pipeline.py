@@ -651,8 +651,12 @@ class GraphRAGPipeline:
         
         logger.info(f"[Stage 6] Chunk 存储完成: {chunks_stored}/{len(chunks)}, CONTAINS关系: {contains_relations_stored}")
         
-        # 2. 存储实体节点（Concept）
+        # 2. 存储实体节点（Concept）- 先生成向量再存储
         logger.info(f"[Stage 6] 开始存储 {len(entities)} 个实体节点并创建 MENTIONS 关系")
+        
+        # 为Concept生成向量嵌入
+        entities = self._generate_entity_embeddings_batch(entities)
+        
         for entity in entities:
             try:
                 concept_id = entity.get("concept_id") or hashlib.sha256(
@@ -699,11 +703,17 @@ class GraphRAGPipeline:
             except Exception as e:
                 logger.warning(f"[Stage 6] 存储实体失败: {e}")
         
-        # 3. 存储 Claim 节点
+        # 3. 存储 Claim 节点 - 先生成向量再存储
         logger.info(f"[Stage 6] 开始存储 {len(claims)} 个 Claim 节点并创建 CONTAINS_CLAIM 关系")
+        
+        # 为Claim生成向量嵌入
+        claims = self._generate_claim_embeddings_batch(claims)
+        
         for claim in claims:
             try:
-                self.graph_service.store_claim(claim.model_dump())
+                # 使用 model_dump 并包含 embedding
+                claim_data = claim.model_dump()
+                self.graph_service.store_claim(claim_data)
                 claims_stored += 1
                 
                 # 创建 Chunk → Claim 的 CONTAINS_CLAIM 关系
@@ -844,7 +854,7 @@ class GraphRAGPipeline:
         self,
         chunks: List[ChunkMetadata]
     ) -> List[ChunkMetadata]:
-        """批量生成向量嵌入"""
+        """批量生成Chunk向量嵌入"""
         if not settings.enable_vector_search:
             return chunks
         
@@ -858,6 +868,84 @@ class GraphRAGPipeline:
                 logger.warning(f"[Pipeline] 生成embedding失败: chunk={chunk.id}, error={e}")
         
         return chunks
+    
+    def _generate_entity_embeddings_batch(
+        self,
+        entities: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        批量生成实体（Concept）向量嵌入
+        
+        Args:
+            entities: 实体列表，每个实体包含 concept_name, description 等字段
+        
+        Returns:
+            添加了embedding字段的实体列表
+        """
+        if not settings.enable_vector_search:
+            return entities
+        
+        logger.info(f"[Pipeline] 开始生成实体向量嵌入: {len(entities)} 个实体")
+        embedded_count = 0
+        
+        for entity in entities:
+            try:
+                if entity.get("embedding"):
+                    continue  # 已有向量，跳过
+                
+                # 使用 name + description 构建向量输入文本
+                name = entity.get("concept_name", "")
+                description = entity.get("description", "")
+                
+                if name:
+                    # 优先使用 name + description（如果有）
+                    embedding_text = f"{name}. {description}" if description else name
+                    entity["embedding"] = get_embedding(embedding_text, model=settings.embedding_model)
+                    embedded_count += 1
+                else:
+                    logger.warning(f"[Pipeline] 实体缺少名称，跳过向量生成: {entity}")
+                    
+            except Exception as e:
+                logger.warning(f"[Pipeline] 生成实体embedding失败: entity={entity.get('concept_name')}, error={e}")
+        
+        logger.info(f"[Pipeline] 实体向量嵌入生成完成: {embedded_count}/{len(entities)}")
+        return entities
+    
+    def _generate_claim_embeddings_batch(
+        self,
+        claims: List[Any]
+    ) -> List[Any]:
+        """
+        批量生成论断（Claim）向量嵌入
+        
+        Args:
+            claims: Claim对象列表
+        
+        Returns:
+            添加了embedding字段的Claim列表
+        """
+        if not settings.enable_vector_search:
+            return claims
+        
+        logger.info(f"[Pipeline] 开始生成论断向量嵌入: {len(claims)} 个论断")
+        embedded_count = 0
+        
+        for claim in claims:
+            try:
+                if hasattr(claim, 'embedding') and claim.embedding:
+                    continue  # 已有向量，跳过
+                
+                # 使用 claim.text 构建向量输入
+                text = getattr(claim, 'text', '')
+                if text:
+                    claim.embedding = get_embedding(text, model=settings.embedding_model)
+                    embedded_count += 1
+                    
+            except Exception as e:
+                logger.warning(f"[Pipeline] 生成论断embedding失败: claim_id={getattr(claim, 'id', 'unknown')}, error={e}")
+        
+        logger.info(f"[Pipeline] 论断向量嵌入生成完成: {embedded_count}/{len(claims)}")
+        return claims
     
     async def process_batch(
         self,

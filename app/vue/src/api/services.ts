@@ -425,32 +425,6 @@ export const checkQAHealth = (): Promise<{ status: string; provider: string; has
 
 // ========== Evaluation Service ==========
 
-export interface GraphQualityResult {
-  structural_quality: {
-    node_count: number
-    edge_count: number
-    avg_degree: number
-    modularity: number
-    density: number
-    connected_components: number
-  }
-  content_quality: {
-    sample_size: number
-    valid_ratio: number
-    avg_confidence: number
-    predicate_diversity: number
-    predicate_normalized_ratio: number
-  }
-  construction_efficiency: {
-    documents_processed: number
-    total_build_time: number
-    tokens_consumed: number
-    throughput: number
-  }
-  overall_score: number
-  recommendations: string[]
-}
-
 export interface AnswerEvaluationResult {
   success: boolean
   question: string
@@ -491,9 +465,6 @@ export interface AnswerEvaluationResult {
     rag_over_llm_percent: number
   }
 }
-
-export const evaluateGraphQuality = (): Promise<GraphQualityResult> =>
-  api.get('/evaluation/graph')
 
 export const evaluateAnswerQuality = (question: string, expectedAnswer?: string): Promise<AnswerEvaluationResult> =>
   api.post('/evaluation/answer', {
