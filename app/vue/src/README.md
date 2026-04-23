@@ -13,6 +13,7 @@ src/
 │   └── services.ts         # API 方法定义
 ├── components/              # 公共组件
 │   ├── AppContent.vue      # 内容容器
+│   ├── Markdown.vue        # Markdown渲染组件
 │   ├── ProcessingFloater.vue  # 处理状态浮窗
 │   └── QADialog.vue        # 问答对话框
 ├── views/                   # 页面组件
@@ -22,6 +23,7 @@ src/
 │   ├── Graph.vue           # 图谱可视化
 │   ├── Query.vue           # 知识查询
 │   ├── KnowledgeCard.vue   # 知识卡片
+│   ├── Evaluation.vue      # 质量评估
 │   ├── Status.vue          # 处理状态
 │   └── Settings.vue        # 系统设置
 ├── layouts/                 # 布局组件
@@ -30,6 +32,7 @@ src/
 │   └── index.ts            # 路由定义
 ├── stores/                  # 状态管理
 │   ├── app.ts              # 应用状态
+│   ├── documents.ts        # 文档状态
 │   └── processing.ts       # 处理状态
 ├── i18n/                    # 国际化
 │   ├── index.ts            # i18n 配置
@@ -37,9 +40,10 @@ src/
 │       ├── zh.json         # 中文
 │       └── en.json         # 英文
 ├── styles/                  # 全局样式
-│   └── main.scss           # 主样式文件
+│   ├── main.scss           # 主样式文件
+│   └── variables.scss      # CSS变量
 └── types/                   # TypeScript 类型定义
-    └── cytoscape-dagre.d.ts
+    └── cytoscape-dagre.d.ts # Cytoscape类型声明
 ```
 
 ## 🎨 核心页面

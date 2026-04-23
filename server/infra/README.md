@@ -26,6 +26,10 @@ infra/
 └── schema.cypher            # Neo4j数据库Schema定义
 ```
 
+**依赖服务**:
+- Neo4j 5.26-community (带APOC和GDS插件)
+- Redis 7.4.7-alpine (用于异步任务队列)
+
 ---
 
 ## 🤖 AI Providers (`ai_providers.py`)

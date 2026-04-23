@@ -42,29 +42,57 @@ Kg4se/
 ├── DOCUMENTATION_INDEX.md      # 文档总览/导航
 ├── app/vue/                    # 前端应用
 │   ├── src/                    # 业务页面、组件、stores、api
-│   │   └── views/
-│   │       └── Evaluation.vue   # 质量分析页面(新增)
+│   │   ├── api/                # API服务层(index.ts, services.ts)
+│   │   ├── views/              # 页面组件
+│   │   │   ├── Dashboard.vue   # 仪表盘
+│   │   │   ├── Upload.vue      # 文档上传
+│   │   │   ├── Documents.vue   # 文档管理
+│   │   │   ├── Graph.vue       # 图谱可视化
+│   │   │   ├── Query.vue       # 智能问答
+│   │   │   ├── KnowledgeCard.vue # 知识卡片
+│   │   │   ├── Evaluation.vue  # 质量评估
+│   │   │   ├── Status.vue      # 处理状态
+│   │   │   └── Settings.vue    # 系统设置
+│   │   ├── components/         # 通用组件
+│   │   ├── stores/             # Pinia状态管理
+│   │   └── i18n/               # 国际化配置
 │   └── DEVELOPMENT_GUIDE.md    # 前端开发指南
 ├── server/                     # 后端服务
 │   ├── main.py                 # FastAPI 入口
+│   ├── config/                 # 配置管理(新增)
+│   │   ├── config_manager.py   # 配置管理器
+│   │   ├── instances.py        # 服务实例初始化
+│   │   └── settings.py         # 环境变量配置
 │   ├── infra/                  # 基础设施(Neo4j/AI/存储/队列)
 │   │   └── README.md
 │   ├── models/                 # 数据模型
+│   │   ├── document.py         # 文档/Chunk/三元组模型
+│   │   ├── graph.py            # 图谱模型
+│   │   ├── knowledge_card.py   # 知识卡片模型
 │   │   └── README.md
 │   ├── services/               # 业务服务
 │   │   ├── parser.py           # 文档解析(集成OCR/Docling)
+│   │   ├── graphrag_pipeline_service.py # GraphRAG流水线服务
 │   │   └── README.md
 │   ├── routes/                 # API 路由
-│   │   ├── evaluation.py       # 评估API(新增)
+│   │   ├── evaluation.py       # 评估API
+│   │   ├── knowledge_card.py   # 知识卡片API
 │   │   └── README.md
 │   ├── graphrag/               # GraphRAG 八阶段流水线
-│   │   ├── stages/             # 阶段实现
+│   │   ├── stages/             # 阶段实现(Stage 0-8)
+│   │   ├── api/                # GraphRAG API接口
+│   │   ├── config/             # YAML配置(本体/谓词/阈值)
+│   │   ├── models/             # GraphRAG数据模型
+│   │   ├── utils/              # 工具函数
 │   │   └── README.md
-│   ├── prompts/                # Prompt管理(新增)
-│   ├── evaluation/             # 评估模块(新增)
+│   ├── prompts/                # Prompt模板管理
+│   │   ├── graphrag/           # GraphRAG相关Prompt
+│   │   └── triplet_extraction/ # 三元组提取Prompt
+│   ├── evaluation/             # 评估模块
 │   │   ├── graph_quality.py    # 图谱质量评估
 │   │   └── answer_quality.py   # 回答质量评估
-│   └── tests/                  # 测试套件与指南
+│   ├── tests/                  # 测试套件与指南
+│   └── requirements.txt        # Python依赖
 └── docker-compose.yml
 ```
 
@@ -76,8 +104,8 @@ Kg4se/
 |------|------|
 | Python | 3.11 (>=3.8 可运行) |
 | Node.js | 18+ |
-| Neo4j | 5.x |
-| Redis | 6.x |
+| Neo4j | 5.26-community |
+| Redis | 7.4.7-alpine |
 | Docker (可选) | 20.10+ |
 
 ### 🐳 使用 Docker Compose 部署数据库
@@ -85,9 +113,9 @@ Kg4se/
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd POW
+cd Kg4se
 
-# 启动前后端 + Neo4j + Redis
+# 启动 Neo4j + Redis
 docker-compose up -d
 ```
 
@@ -96,14 +124,21 @@ docker-compose up -d
 ```bash
 # 后端
 cd server
-python -m venv .venv && source .venv/bin/activate
+
+# 环境配置
+cp .env.test .env # Linux/Mac
+copy .env.test .env # Windows
+
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+.venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 
 # 前端
 cd app/vue
 npm install
-npm run dev -- --port 3000
+npm run dev
 ```
 
 ### 🌐 访问应用
@@ -113,7 +148,7 @@ npm run dev -- --port 3000
 | 前端 | <http://localhost:3000> | Vue 3 界面 |
 | 后端 API | <http://localhost:8000> | FastAPI 服务 |
 | API 文档 | <http://localhost:8000/docs> | Swagger UI |
-| Neo4j 控制台 | <http://localhost:7474> | 图数据库管理 |
+| Neo4j 控制台 | <http://localhost:17474> | 图数据库管理 |
 
 ---
 
@@ -158,8 +193,8 @@ npm run dev -- --port 3000
 │  │ 管理   │  │ 可视化  │  │ 卡片   │  │ 系统   │  │ 管理   │ │
 │  └────────┘  └────────┘  └────────┘  └────────┘  └────────┘ │
 │                          ┌────────────────┐                  │
-│                          │ 质量分析      │                  │
-│                          │ (评估模块)    │                  │
+│                          │ 质量评估      │                  │
+│                          │ (Evaluation)  │                  │
 │                          └────────────────┘                  │
 └────────────────────┬─────────────────────────────────────────┘
                      │ HTTP/WebSocket
@@ -169,10 +204,10 @@ npm run dev -- --port 3000
 │  │ Upload │  │ Graph  │  │ Ingest │  │   QA   │  │Settings│ │
 │  │  API   │  │  API   │  │  API   │  │  API   │  │  API   │ │
 │  └────────┘  └────────┘  └────────┘  └────────┘  └────────┘ │
-│                          ┌────────────────┐                  │
-│                          │ Evaluation API │                  │
-│                          │ (质量评估)     │                  │
-│                          └────────────────┘                  │
+│  ┌────────────────┐  ┌────────────────┐                     │
+│  │ KnowledgeCard  │  │  Evaluation    │                     │
+│  │     API        │  │     API        │                     │
+│  └────────────────┘  └────────────────┘                     │
 └────────────────────┬─────────────────────────────────────────┘
                      │
 ┌────────────────────▼─────────────────────────────────────────┐
@@ -181,15 +216,15 @@ npm run dev -- --port 3000
 │  │  Parser  │  │Extractor │  │  Linker  │  │QA Service│    │
 │  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
 │                          ┌────────────────┐                  │
-│                          │ Evaluation    │                  │
-│                          │ (评估服务)    │                  │
+│                          │ GraphRAG      │                  │
+│                          │ Pipeline      │                  │
 │                          └────────────────┘                  │
 └────────────────────┬─────────────────────────────────────────┘
                      │
 ┌────────────────────▼─────────────────────────────────────────┐
-│                   GraphRAG 管道 (8 阶段)                      │
+│                   GraphRAG 管道 (9 阶段)                      │
 │  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐         │
-│  │ 切分 │→│ 消解 │→│ 链接 │→│ 提取 │→│ ...  │  8 阶段  │
+│  │ 切分 │→│ 消解 │→│ 链接 │→│ 提取 │→│ ...  │  9 阶段  │
 │  └──────┘  └──────┘  └──────┘  └──────┘  └──────┘         │
 └────────────────────┬─────────────────────────────────────────┘
                      │

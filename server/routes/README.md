@@ -33,6 +33,26 @@ Kg4se 后端 API 路由模块,提供 RESTful API 接口。
 | `/evaluation` | evaluation.py | 质量评估（图谱质量、回答质量） |
 | `/settings` | settings.py | 系统设置 |
 
+### 依赖服务端口
+
+| 服务 | Docker端口 | 本地端口 | 说明 |
+|------|-----------|---------|------|
+| Neo4j HTTP | 17474 | 7474 | 图数据库控制台 |
+| Neo4j Bolt | 17687 | 7687 | 图数据库连接 |
+| Redis | 16379 | 6379 | 缓存/队列 |
+
+### 路由前缀
+
+| 前缀 | 模块 | 描述 |
+|------|------|------|
+| `/uploads` | upload.py | 文档上传和管理 |
+| `/ingest` | ingest.py | 知识抽取任务 |
+| `/graph` | graph.py | 图谱查询和可视化 |
+| `/qa` | qa.py | 智能问答 |
+| `/knowledge-cards` | knowledge_card.py | 知识卡片管理 |
+| `/evaluation` | evaluation.py | 质量评估（图谱质量、回答质量） |
+| `/settings` | settings.py | 系统设置 |
+
 ## 📦 路由模块
 
 ### 1. Upload Routes (`upload.py`)

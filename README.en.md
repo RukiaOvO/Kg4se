@@ -42,17 +42,56 @@ Kg4se/
 ├── DOCUMENTATION_INDEX.md      # Documentation index
 ├── app/vue/                    # Frontend app
 │   ├── src/                    # Views, components, stores, api
+│   │   ├── api/               # API service layer
+│   │   ├── views/             # Page components
+│   │   │   ├── Dashboard.vue   # Dashboard
+│   │   │   ├── Upload.vue      # Document upload
+│   │   │   ├── Documents.vue   # Document management
+│   │   │   ├── Graph.vue       # Graph visualization
+│   │   │   ├── Query.vue       # Q&A system
+│   │   │   ├── KnowledgeCard.vue # Knowledge cards
+│   │   │   ├── Evaluation.vue  # Quality evaluation
+│   │   │   ├── Status.vue      # Processing status
+│   │   │   └── Settings.vue    # System settings
+│   │   ├── components/        # Shared components
+│   │   ├── stores/            # Pinia state management
+│   │   └── i18n/              # Internationalization
 │   └── DEVELOPMENT_GUIDE.md    # Frontend guide
 ├── server/                     # Backend service
 │   ├── main.py                 # FastAPI entry
+│   ├── config/                 # Configuration management
+│   │   ├── config_manager.py   # Config manager
+│   │   ├── instances.py        # Service instance init
+│   │   └── settings.py         # Environment settings
 │   ├── infra/                  # Infra (Neo4j/AI/storage/queue)
 │   │   └── README.md
 │   ├── models/                 # Data models
+│   │   ├── document.py         # Document/Chunk/Triplet models
+│   │   ├── graph.py            # Graph models
+│   │   ├── knowledge_card.py   # Knowledge card models
 │   │   └── README.md
 │   ├── services/               # Business services
+│   │   ├── parser.py           # Document parser (OCR/Docling)
+│   │   ├── graphrag_pipeline_service.py # GraphRAG pipeline
+│   │   └── README.md
 │   ├── routes/                 # API routes
-│   ├── graphrag/               # GraphRAG 8-stage pipeline
-│   └── tests/                  # Tests and guides
+│   │   ├── evaluation.py       # Evaluation API
+│   │   ├── knowledge_card.py   # Knowledge card API
+│   │   └── README.md
+│   ├── graphrag/               # GraphRAG 9-stage pipeline
+│   │   ├── stages/             # Stage implementations (0-8)
+│   │   ├── api/                # GraphRAG API
+│   │   ├── config/             # YAML configs
+│   │   ├── models/             # GraphRAG models
+│   │   └── utils/              # Utilities
+│   ├── prompts/                # Prompt templates
+│   │   ├── graphrag/           # GraphRAG prompts
+│   │   └── triplet_extraction/ # Triplet extraction prompts
+│   ├── evaluation/             # Evaluation module
+│   │   ├── graph_quality.py    # Graph quality eval
+│   │   └── answer_quality.py   # Answer quality eval
+│   ├── tests/                  # Tests and guides
+│   └── requirements.txt        # Python dependencies
 └── docker-compose.yml
 ```
 
@@ -64,8 +103,8 @@ Kg4se/
 |-----------|---------|
 | Python | 3.11 (>=3.8 works) |
 | Node.js | 18+ |
-| Neo4j | 5.x |
-| Redis | 6.x |
+| Neo4j | 5.26-community |
+| Redis | 7.4.7-alpine |
 | Docker (optional) | 20.10+ |
 
 ### Using Docker Compose (recommended)
@@ -73,9 +112,9 @@ Kg4se/
 ```bash
 # Clone
 git clone <repository-url>
-cd POW
+cd Kg4se
 
-# Start frontend + backend + Neo4j + Redis
+# Start Neo4j + Redis
 docker-compose up -d
 ```
 
@@ -84,14 +123,20 @@ docker-compose up -d
 ```bash
 # Backend
 cd server
-python -m venv .venv && source .venv/bin/activate
+
+cp .env.test .env # Linux/Mac
+copy .env.test .env # Windows
+
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+.venv\Scripts\activate     # Windows
 pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 
 # Frontend
 cd app/vue
 npm install
-npm run dev -- --port 3000
+npm run dev
 ```
 
 ### Access
@@ -112,8 +157,9 @@ npm run dev -- --port 3000
 
 ### Knowledge graph (GraphRAG)
 
-- 8-stage pipeline: chunk → coref → link → extract → theme → predicate → store → query
+- 9-stage pipeline: chunk → coref → link → extract → theme → predicate → store → query → metrics
 - Idempotent Neo4j MERGE storage with deduplication
+- Configurable ontology, predicates, and thresholds
 
 ### Visualization
 

@@ -11,23 +11,39 @@
 ```
 Kg4se/
 ├── server/                     # 后端服务 (Python + FastAPI)
+│   ├── config/               # 配置管理 (新增)
+│   │   ├── config_manager.py # 配置管理器
+│   │   ├── instances.py      # 服务实例初始化
+│   │   └── settings.py       # 环境变量设置
 │   ├── infra/                 # 基础设施层
 │   ├── models/                # 数据模型
 │   ├── services/              # 业务服务
 │   ├── routes/                # API路由
-│   ├── graphrag/              # 知识图谱RAG (8阶段流水线)
-│   │   └── stages/            # 各阶段实现
-│   ├── prompts/               # Prompt管理 (集中管理)
-│   ├── evaluation/            # 评估模块 (新增)
-│   │   ├── graph_quality.py   # 图谱质量评估
-│   │   └── answer_quality.py  # 回答质量评估
+│   ├── graphrag/              # 知识图谱RAG (9阶段流水线)
+│   │   ├── stages/           # 各阶段实现 (Stage 0-8)
+│   │   ├── api/              # GraphRAG API
+│   │   ├── config/           # YAML配置
+│   │   ├── models/           # GraphRAG模型
+│   │   └── utils/            # 工具函数
+│   ├── prompts/               # Prompt模板管理
+│   ├── evaluation/            # 评估模块
+│   │   ├── graph_quality.py  # 图谱质量评估
+│   │   └── answer_quality.py # 回答质量评估
 │   └── tests/                 # 测试套件
 │
 ├── app/vue/                   # 前端应用 (Vue 3 + TypeScript)
 │   └── src/
 │       ├── api/              # API服务层
 │       ├── views/            # 页面组件
-│       │   └── Evaluation.vue # 质量分析页面(新增)
+│       │   ├── Dashboard.vue # 仪表盘
+│       │   ├── Upload.vue    # 文档上传
+│       │   ├── Documents.vue # 文档管理
+│       │   ├── Graph.vue     # 图谱可视化
+│       │   ├── Query.vue     # 智能问答
+│       │   ├── KnowledgeCard.vue # 知识卡片
+│       │   ├── Evaluation.vue # 质量评估
+│       │   ├── Status.vue    # 处理状态
+│       │   └── Settings.vue  # 系统设置
 │       ├── components/       # 通用组件
 │       ├── stores/           # 状态管理
 │       └── router/           # 路由配置
@@ -48,9 +64,8 @@ Kg4se/
 | 文档 | 路径 | 说明 |
 |------|------|------|
 | 项目README | `/README.md` | 项目简介、安装、运行指南 |
-| 快速开始 | `/QUICKSTART.md` | 5分钟快速上手 |
-| Docker部署 | `/DOCKER.md` | Docker容器化部署 |
-| 环境配置 | `/ENVIRONMENT.md` | 环境变量和配置说明 |
+| 文档索引 | `/DOCUMENTATION_INDEX.md` | 文档导航与学习路径 |
+| Docker部署 | `/docker-compose.yml` | Docker容器化配置 |
 
 ---
 
@@ -67,9 +82,10 @@ Kg4se/
 **核心内容**:
 - ✅ 支持OpenAI、Claude、Gemini、通义千问等12个AI提供商
 - ✅ Neo4j连接管理（自动重连、批量操作）
-- ✅ 配置管理（环境变量、.env文件）
+- ✅ 配置管理（环境变量、.env文件、config模块）
 - ✅ 异步任务队列（Redis）
 - ✅ 文件存储服务
+- ✅ Neo4j 5.26-community + APOC + GDS 插件
 
 ---
 
@@ -77,14 +93,15 @@ Kg4se/
 
 | 文档 | 路径 | 内容 |
 |------|------|------|
-| Models模块说明 | `/server/models/README.md` | 所有数据模型定义和使用示例 |
-| API模型规范 | `/server/models/API_MODELS.md` | 请求/响应模型规范 |
+| Models模块说明 | `/server/models/README.md` | 所有数据模型定义、请求/响应模型规范 |
 
 **核心模型**:
 - `Document`: 文档模型
 - `Chunk`: 文本块模型
 - `Triplet`: 三元组（知识图谱基本单元）
 - `AIExtractionRequest`: AI提取配置
+- `KnowledgeCard`: 知识卡片模型
+- `Graph`: 图谱节点/边模型
 
 ---
 
@@ -98,11 +115,13 @@ Kg4se/
 | EntityLinker服务 | `/server/services/LINKER.md` | 实体链接服务 |
 
 **核心服务**:
-- `ParserService`: 支持PDF、Word、Markdown、EPUB等格式
+- `ParserService`: 支持PDF、Word、Markdown、EPUB等格式，集成Docling和RapidOCR
 - `TripletExtractor`: 基于LLM的三元组提取
 - `EntityLinker`: 实体去重和链接
 - `AISegmenter`: AI智能分段
 - `QAService`: 智能问答
+- `GraphRAGPipelineService`: GraphRAG完整流水线编排
+- `ConfigService`: 配置管理服务
 
 ---
 
@@ -115,14 +134,13 @@ Kg4se/
 | 认证授权 | `/server/routes/AUTH.md` | 认证和权限管理 |
 
 **API模块**:
-- `/api/documents`: 文档管理API
-- `/api/upload`: 文件上传API
-- `/api/graph`: 图谱可视化API
+- `/api/uploads`: 文档管理API
 - `/api/ingest`: 知识提取API
+- `/api/graph`: 图谱可视化API
 - `/api/qa`: 智能问答API
-- `/api/knowledge`: 知识卡片API
+- `/api/knowledge-cards`: 知识卡片API
 - `/api/settings`: 系统设置API
-- `/api/evaluation`: 质量评估API (新增)
+- `/api/evaluation`: 质量评估API
   - `/evaluation/graph`: 图谱质量分析
   - `/evaluation/answer`: 回答质量对比评估
 
@@ -138,8 +156,9 @@ Kg4se/
 | Stage 2: Linker | `/server/graphrag/stages/STAGE2.md` | 实体链接 |
 | Stage 3: Extractor | `/server/graphrag/stages/STAGE3.md` | 三元组提取 |
 | Stage 4: Theme | `/server/graphrag/stages/STAGE4.md` | 主题构建 |
+| Stage 5-8 | `/server/graphrag/stages/` | 谓词治理/存储/查询/指标 |
 
-**8阶段Pipeline**:
+**9阶段Pipeline**:
 1. 📄 Stage 0: 篇章切分
 2. 🔗 Stage 1: 指代消解
 3. 🏷️ Stage 2: 实体链接
@@ -184,10 +203,9 @@ Kg4se/
 - `Graph.vue`: 知识图谱可视化（1571行核心代码）
 - `Query.vue`: 智能问答（对话界面）
 - `KnowledgeCard.vue`: 知识卡片（概念浏览）
+- `Evaluation.vue`: 质量评估（图谱质量、回答对比）
+- `Status.vue`: 处理状态监控
 - `Settings.vue`: 系统设置（AI配置）
-- `Evaluation.vue`: 质量分析页面（新增）
-  - 知识图谱质量分析：结构质量、内容质量、构建效率
-  - LLM回答质量对比：GraphRAG vs RAG vs LLM
 
 **技术亮点**:
 - ✅ Cytoscape.js图可视化（5种布局算法）
@@ -246,125 +264,6 @@ Kg4se/
 3. 使用示例: `/server/services/extractor.py`
 4. 前端设置: `/app/vue/src/views/Settings.vue`
 
----
-
-## 🎓 学习路径推荐
-
-### 新手入门 (第1-3天)
-
-1. 阅读主README: `/README.md`
-2. 运行Quick Start: 按照步骤启动项目
-3. 前端架构: `/app/vue/src/README.md`
-4. 数据模型: `/server/models/README.md`
-5. 测试运行: `/server/tests/QUICK_REFERENCE.md`
-
----
-
-### 后端开发 (第4-7天)
-
-1. **基础设施**:
-   - Infra模块: `/server/infra/README.md`
-   - Neo4j操作: 学习图数据库查询
-   - AI集成: 了解各AI提供商特点
-
-2. **业务服务**:
-   - Services模块: `/server/services/README.md`
-   - 文档解析: 支持新文件格式
-   - 知识抽取: 优化提取算法
-
-3. **API开发**:
-   - Routes模块: `/server/routes/README.md`
-   - FastAPI框架: 学习路由和中间件
-   - API测试: Postman/curl调试
-
----
-
-### 前端开发 (第8-10天)
-
-1. **Vue基础**:
-   - 开发指南: `/app/vue/DEVELOPMENT_GUIDE.md`
-   - Composition API: 组件开发规范
-   - TypeScript: 类型定义
-
-2. **核心功能**:
-   - 图谱可视化: Cytoscape.js实践
-   - 状态管理: Pinia使用
-   - 组件开发: Naive UI集成
-
-3. **样式和交互**:
-   - SCSS编写
-   - 响应式设计
-   - 动画效果
-
----
-
-### GraphRAG深入 (第11-14天)
-
-1. Pipeline概览: `/server/graphrag/README.md`
-2. 各阶段实现:
-   - 文档切分策略
-   - 指代消解算法
-   - 实体链接机制
-   - 主题构建方法
-3. 测试和优化:
-   - 编写Stage测试
-   - 性能profiling
-   - 调优参数
-
----
-
-## 📝 文档编写规范
-
-### 模块文档结构
-
-每个模块的README.md应包含:
-
-```markdown
-# 模块名称
-
-## 📋 模块概述
-- 核心职责
-- 主要功能
-
-## 📁 模块结构
-- 文件列表
-- 目录说明
-
-## 🔧 核心类/函数
-- API文档
-- 使用示例
-
-## 💡 使用场景
-- 典型用例
-- 最佳实践
-
-## 🧪 测试
-- 测试覆盖
-- 测试示例
-
-## 📚 相关文档
-- 链接到其他文档
-```
-
----
-
-## 🔄 文档维护
-
-### 更新频率
-
-- **主文档**: 每个版本发布时更新
-- **API文档**: 代码变更后同步更新
-- **开发指南**: 每月审查一次
-- **测试文档**: 测试变更后更新
-
-### 贡献指南
-
-1. 发现文档问题？提Issue
-2. 想改进文档？提PR
-3. 新增功能？同步更新文档
-4. 重构代码？检查相关文档
-
----
 
 ## 🔗 外部资源
 
