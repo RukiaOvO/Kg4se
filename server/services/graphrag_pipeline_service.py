@@ -254,6 +254,8 @@ class GraphRAGPipelineService:
         """将PipelineResult转换为统计字典"""
         return {
             "chunks": result.chunks_count,
+            "triplets": result.claims_count,
+            "concepts": result.entities_count,
             "entities": result.entities_count,
             "claims": result.claims_count,
             "themes": result.themes_count,

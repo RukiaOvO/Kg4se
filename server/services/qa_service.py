@@ -15,7 +15,7 @@ class QAService:
     
     def __init__(self):
         self.ai_client = self._initialize_ai_client()
-        self.context_limit = 2000  # 字符限制
+        self.context_limit = 4000  # 字符限制，增加到4000以嵌入更多信息
     
     def _query_vector_store(self, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Query vector store for similar documents using Neo4j vector index."""
@@ -122,19 +122,24 @@ class QAService:
                    OR ANY(alias IN coalesce(n.aliases, []) WHERE toLower(alias) CONTAINS toLower(keyword)))
             WITH n LIMIT $limit
             OPTIONAL MATCH (n)-[r]-(related)
-            WITH n, collect({
+            WITH n, collect(DISTINCT {
                 type: type(r),
-                target_name: related.name,
-                target_type: coalesce(related.type, 'Unknown')
+                target_name: coalesce(related.name, related.label, related.id, 'Unknown'),
+                target_type: coalesce(related.type, labels(related)[0], 'Unknown')
             }) AS rels
             OPTIONAL MATCH (n)<-[mc:MENTIONS]-(c:Claim)
-            WITH n, rels, collect({
+            WITH n, rels, collect(DISTINCT {
                 claim_text: c.text,
                 claim_type: c.claim_type,
                 confidence: c.confidence,
                 modality: c.modality,
                 polarity: c.polarity
             }) AS all_claims
+            WITH n, rels, all_claims
+            UNWIND all_claims AS claim
+            WITH n, rels, claim
+            ORDER BY n.name, claim.confidence DESC
+            WITH n, rels, collect(claim)[0..3] AS top_claims
             RETURN {
                 entity: {
                     id: elementId(n),
@@ -148,7 +153,7 @@ class QAService:
                     aliases: n.aliases
                 },
                 relationships: rels,
-                claims: [c IN all_claims ORDER BY c.confidence DESC LIMIT 3]
+                claims: top_claims
             } AS result
             """
             
@@ -434,7 +439,7 @@ class QAService:
             answer = self.ai_client.chat_completion(
                 messages=messages,
                 temperature=0.3,
-                max_tokens=1024
+                max_tokens=2048
             )
             
             return {
@@ -546,7 +551,7 @@ class QAService:
             answer = self.ai_client.chat_completion(
                 messages=messages,
                 temperature=0.3,
-                max_tokens=1024
+                max_tokens=2048
             )
             
             return {
@@ -615,7 +620,7 @@ class QAService:
             answer = self.ai_client.chat_completion(
                 messages=messages,
                 temperature=0.3,
-                max_tokens=1024
+                max_tokens=2048
             )
             
             return {

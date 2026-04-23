@@ -49,29 +49,61 @@ class MetricsService:
             "modularity": 0.0
         }
 
-        # 1) 节点计数和孤立节点比例（通过 Document-[:CONTAINS]->Chunk-[:MENTIONS]->Concept 路径查找）
-        isolation_query = """
-        MATCH (d:Document {id: $doc_id})-[:CONTAINS]->(:Chunk)-[:MENTIONS]->(c:Concept)
-        OPTIONAL MATCH (c)-[r]-(other)
-        WHERE (other:Concept) OR (other:Chunk)
-        WITH DISTINCT c, count(r) AS deg
-        RETURN sum(CASE WHEN deg = 0 THEN 1 ELSE 0 END) AS isolated_nodes,
-               count(DISTINCT c) AS total_nodes
+        # 1) 获取该文档子图的所有节点（包括Document、Chunk、Concept、Claim、Entity等）
+        # 使用Document作为入口点，找到所有相关节点
+        nodes_query = """
+        MATCH (d:Document {id: $doc_id})
+        OPTIONAL MATCH (d)-[*1..3]-(n)
+        WHERE NOT (n:Document) OR n.id = $doc_id
+        WITH COLLECT(DISTINCT d) + COLLECT(DISTINCT n) AS all_node_arrays
+        UNWIND all_node_arrays AS node_array
+        UNWIND node_array AS node
+        RETURN count(DISTINCT node) AS total_nodes
         """
-        iso_result = self.neo4j_client.execute_query(isolation_query, {"doc_id": doc_id})
-        isolated_nodes = iso_result[0].get("isolated_nodes", 0) if iso_result else 0
-        total_nodes = iso_result[0].get("total_nodes", 0) if iso_result else 0
+        nodes_result = self.neo4j_client.execute_query(nodes_query, {"doc_id": doc_id})
+        total_nodes = nodes_result[0].get("total_nodes", 0) if nodes_result else 0
 
-        # 2) 边数与平均度数（避免重复计数，使用 elementId 约束去重）
-        degree_query = """
-        MATCH (d:Document {id: $doc_id})-[:CONTAINS]->(:Chunk)-[:MENTIONS]->(c1:Concept)
-        MATCH (c1)-[r]-(c2:Concept)
-        WHERE elementId(c1) < elementId(c2)
+        # 2) 计算总边数（所有类型的边，包括CONTAINS、MENTIONS、EVIDENCE_FROM等）
+        # 使用更简单的方式：找到所有相关节点ID，然后查询它们之间的边
+        edges_query = """
+        MATCH (d:Document {id: $doc_id})
+        OPTIONAL MATCH (d)-[*1..3]-(n)
+        WHERE NOT (n:Document) OR n.id = $doc_id
+        WITH COLLECT(DISTINCT d) + COLLECT(DISTINCT n) AS all_node_arrays
+        UNWIND all_node_arrays AS node_array
+        UNWIND node_array AS node
+        WITH COLLECT(DISTINCT node) AS all_nodes
+        UNWIND all_nodes AS source
+        WITH source, all_nodes
+        MATCH (source)-[r]->(target)
+        WHERE target IN all_nodes
         RETURN count(DISTINCT r) AS edge_count
         """
-        deg_result = self.neo4j_client.execute_query(degree_query, {"doc_id": doc_id})
-        edge_count = deg_result[0].get("edge_count", 0) if deg_result else 0
+        edges_result = self.neo4j_client.execute_query(edges_query, {"doc_id": doc_id})
+        edge_count = edges_result[0].get("edge_count", 0) if edges_result else 0
+
+        # 3) 计算平均度数（对于无向图：avg_degree = 2 * |E| / |V|）
         avg_degree = self._safe_ratio(2 * edge_count, total_nodes)
+
+        # 4) 计算孤立节点比例（度数为0的节点）
+        isolated_query = """
+        MATCH (d:Document {id: $doc_id})
+        OPTIONAL MATCH (d)-[*1..3]-(n)
+        WHERE NOT (n:Document) OR n.id = $doc_id
+        WITH COLLECT(DISTINCT d) + COLLECT(DISTINCT n) AS all_node_arrays
+        UNWIND all_node_arrays AS node_array
+        UNWIND node_array AS node
+        WITH COLLECT(DISTINCT node) AS all_nodes
+        UNWIND all_nodes AS node
+        OPTIONAL MATCH (node)-[r]-(other)
+        WHERE other IN all_nodes
+        WITH node, count(r) AS degree
+        RETURN sum(CASE WHEN degree = 0 THEN 1 ELSE 0 END) AS isolated_nodes,
+               count(node) AS total_nodes
+        """
+        isolated_result = self.neo4j_client.execute_query(isolated_query, {"doc_id": doc_id})
+        isolated_nodes = isolated_result[0].get("isolated_nodes", 0) if isolated_result else 0
+        total_for_iso = isolated_result[0].get("total_nodes", 0) if isolated_result else 0
 
         # 3) OTHER 谓词占比（仅统计该文档子图的关系）
         predicate_query = """
@@ -107,7 +139,7 @@ class MetricsService:
         modularity = self._safe_ratio(intra_edges, community_edges)
 
         metrics.update(
-            isolated_node_ratio=self._safe_ratio(isolated_nodes, total_nodes),
+            isolated_node_ratio=self._safe_ratio(isolated_nodes, total_for_iso),
             avg_degree=avg_degree,
             other_predicate_ratio=other_ratio,
             alias_count=alias_count,
