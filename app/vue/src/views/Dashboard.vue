@@ -69,18 +69,17 @@
         </div>
       </div>
 
-      <div class="stat-card" :style="{ '--card-color': '#daa520' }">
-        <div class="stat-icon" style="background: linear-gradient(135deg, #daa520, #c9a668);">
-          <n-icon size="32"><analytics-outline /></n-icon>
+      <div class="stat-card" :style="{ '--card-color': '#9a7509' }">
+        <div class="stat-icon" style="background: linear-gradient(135deg, #9a7509, #8b6914);">
+          <n-icon size="32"><layers-outline /></n-icon>
         </div>
         <div class="stat-content">
-          <div class="stat-label">图谱密度</div>
+          <div class="stat-label">主题社区</div>
           <div class="stat-value">
-            <n-number-animation :from="0" :to="graphDensity" :duration="1000" :precision="2" />%
+            <n-number-animation :from="0" :to="stats.communityCount" :duration="1000" />
           </div>
           <div class="stat-footer">
-            <n-icon :component="TrendingUpOutline" class="trend-icon" />
-            <span class="stat-desc trend-up">持续增长</span>
+            <span class="stat-desc">主题社区数量</span>
           </div>
         </div>
       </div>
@@ -267,8 +266,6 @@ import {
   DocumentTextOutline,
   BulbOutline,
   GitNetworkOutline,
-  AnalyticsOutline,
-  TrendingUpOutline,
   PieChartOutline,
   TrophyOutline,
   RocketOutline,
@@ -310,6 +307,7 @@ const stats = ref({
   totalDocuments: 0,
   totalConcepts: 0,
   totalRelations: 0,
+  communityCount: 0,
   recentDocuments: [],
   topConcepts: [],
   relationTypes: []
@@ -323,12 +321,6 @@ const systemStatus = ref({
 })
 
 // Computed
-const graphDensity = computed(() => {
-  if (stats.value.totalConcepts === 0) return 0
-  const maxPossibleEdges = stats.value.totalConcepts * (stats.value.totalConcepts - 1)
-  if (maxPossibleEdges === 0) return 0
-  return (stats.value.totalRelations / maxPossibleEdges * 100)
-})
 
 // Pie Chart Option
 const pieChartOption = computed(() => {
@@ -482,6 +474,7 @@ const loadStats = async () => {
       totalDocuments: data.totalDocuments || 0,
       totalConcepts: data.totalConcepts || 0,
       totalRelations: data.totalRelations || 0,
+      communityCount: data.communityCount || 0,
       recentDocuments: data.recentDocuments || [],
       topConcepts: data.topConcepts || [],
       relationTypes: data.relationTypes || []

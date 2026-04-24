@@ -835,10 +835,24 @@ async def get_graph_stats():
             print(f"获取关系类型失败: {relations_error}")
             relation_types = []
 
+        # 获取主题社区数
+        community_count = 0
+        try:
+            community_query = """
+            MATCH (t:Theme)
+            RETURN count(DISTINCT t.community_id) as communityCount
+            """
+            community_result = neo4j_client.execute_query(community_query)
+            community_count = community_result[0]["communityCount"] if community_result and len(community_result) > 0 else 0
+        except Exception as community_error:
+            print(f"获取主题社区数失败: {community_error}")
+            community_count = 0
+
         result = {
             "totalDocuments": int(total_docs),
             "totalConcepts": int(total_concepts),
             "totalRelations": int(total_relations),
+            "communityCount": community_count,
             "recentDocuments": recent_docs,
             "topConcepts": top_concepts,
             "relationTypes": relation_types
@@ -853,6 +867,7 @@ async def get_graph_stats():
             "totalDocuments": 0,
             "totalConcepts": 0,
             "totalRelations": 0,
+            "communityCount": 0,
             "recentDocuments": [],
             "topConcepts": [],
             "relationTypes": []
