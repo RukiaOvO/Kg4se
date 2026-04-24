@@ -425,6 +425,42 @@ export const checkQAHealth = (): Promise<{ status: string; provider: string; has
 
 // ========== Evaluation Service ==========
 
+export interface LLMJudgeResult {
+  accuracy: number
+  completeness: number
+  relevance: number
+  expertise: number
+  explainability: number
+  overall: number
+  comment: string
+  sample_std?: {
+    accuracy: number
+    completeness: number
+    relevance: number
+    expertise: number
+    explainability: number
+  }
+}
+
+export interface AutomaticEvaluation {
+  semantic_similarity: number
+  word_overlap: number
+  keyword_coverage: number
+  rouge_l: number
+  score: number
+}
+
+export interface MethodEvaluation {
+  predicted: string
+  expected: string
+  context: string
+  automatic: AutomaticEvaluation
+  fact_consistency: number
+  llm_judge: LLMJudgeResult | null
+  overall_score: number
+  samples: any[] | null
+}
+
 export interface AnswerEvaluationResult {
   success: boolean
   question: string
@@ -432,27 +468,9 @@ export interface AnswerEvaluationResult {
   rag_answer: string
   llm_answer: string
   evaluation: {
-    graphrag: {
-      automatic: {
-        semantic_similarity: number
-        word_overlap: number
-      }
-      overall_score: number
-    }
-    rag: {
-      automatic: {
-        semantic_similarity: number
-        word_overlap: number
-      }
-      overall_score: number
-    }
-    llm: {
-      automatic: {
-        semantic_similarity: number
-        word_overlap: number
-      }
-      overall_score: number
-    }
+    graphrag: MethodEvaluation
+    rag: MethodEvaluation
+    llm: MethodEvaluation
     statistics: {
       graphrag_score: number
       rag_score: number
@@ -464,11 +482,102 @@ export interface AnswerEvaluationResult {
     graphrag_over_llm_percent: number
     rag_over_llm_percent: number
   }
+  trace?: {
+    graphrag: {
+      context_snippet: string | null
+      used_context: boolean
+      entities: Array<{ name: string }>
+    }
+    rag: {
+      context_snippet: string | null
+      used_context: boolean
+      vector_results: Array<{
+        source: string
+        similarity: number
+        text: string
+      }>
+    }
+    llm: {
+      context_snippet: string | null
+      used_context: boolean
+      note?: string
+    }
+  }
 }
 
 export const evaluateAnswerQuality = (question: string, expectedAnswer?: string): Promise<AnswerEvaluationResult> =>
   api.post('/evaluation/answer', {
     question,
     expected_answer: expectedAnswer
-  })
+  }, { timeout: 180000 })
+
+
+// ========== Benchmark Dataset APIs ==========
+
+export interface BenchmarkDataset {
+  id: string
+  filename: string
+  name: string
+  version: string
+  description: string
+  question_count: number
+  categories: string[]
+  difficulty_levels: string[]
+}
+
+export interface BenchmarkQuestion {
+  id: string
+  question: string
+  expected_answer: string
+  category: string
+  difficulty: string
+  keywords: string[]
+}
+
+export interface BenchmarkDatasetDetail {
+  name: string
+  version: string
+  description: string
+  categories: string[]
+  difficulty_levels: string[]
+  questions: BenchmarkQuestion[]
+}
+
+export interface DatasetEvaluationResult {
+  success: boolean
+  dataset_id: string
+  dataset_name: string
+  filters: {
+    category: string | null
+    difficulty: string | null
+  }
+  questions_evaluated: number
+  results: any
+}
+
+export const listBenchmarkDatasets = (): Promise<{ datasets: BenchmarkDataset[] }> =>
+  api.get('/evaluation/datasets')
+
+export const getBenchmarkDataset = (datasetId: string): Promise<{ success: boolean; dataset: BenchmarkDatasetDetail }> =>
+  api.get(`/evaluation/datasets/${datasetId}`)
+
+export const evaluateBenchmarkDataset = (
+  datasetId: string,
+  options?: {
+    category?: string
+    difficulty?: string
+    limit?: number
+    num_samples?: number
+    enable_pairwise?: boolean
+  }
+): Promise<DatasetEvaluationResult> => {
+  const params = new URLSearchParams()
+  if (options?.category) params.append('category', options.category)
+  if (options?.difficulty) params.append('difficulty', options.difficulty)
+  if (options?.limit) params.append('limit', String(options.limit))
+  if (options?.num_samples) params.append('num_samples', String(options.num_samples))
+  if (options?.enable_pairwise !== undefined) params.append('enable_pairwise', String(options.enable_pairwise))
+  
+  return api.post(`/evaluation/datasets/${datasetId}/evaluate?${params.toString()}`, {}, { timeout: 600000 })
+}
 

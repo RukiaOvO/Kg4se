@@ -17,12 +17,22 @@ class QAService:
         self.ai_client = self._initialize_ai_client()
         self.context_limit = 4000  # 字符限制，增加到4000以嵌入更多信息
     
+    def chat(self, prompt: str, temperature: float = None) -> str:
+        """通用聊天接口，供 PointwiseEvaluator 等评估器调用"""
+        t = temperature if temperature is not None else 0.3
+        system_msg = "You are a helpful assistant. Please respond in JSON format."
+        messages = [{"role": "system", "content": system_msg}, {"role": "user", "content": prompt}]
+        logger.info(f"[QA服务 chat] 调用 judge_model，温度: {t}")
+        return self.ai_client.chat_completion(messages=messages, temperature=t, json_mode=True)
+    
     def _query_vector_store(self, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Query vector store for similar documents using Neo4j vector index."""
         try:
+            from config import settings
             from graphrag.utils.embedding import get_embedding
             
             query_embedding = get_embedding(question)
+            similarity_threshold = settings.vector_search_threshold
             
             if not query_embedding or all(v == 0.0 for v in query_embedding):
                 logger.debug("[QA服务] 向量化失败，使用关键词匹配")
@@ -35,7 +45,7 @@ class QAService:
                 claim_query = """
                     CALL db.index.vector.queryNodes('claim_embeddings', $topK, $queryVector)
                     YIELD node, score
-                    WHERE node.embedding IS NOT NULL AND node.text IS NOT NULL
+                    WHERE node.embedding IS NOT NULL AND node.text IS NOT NULL AND score >= $threshold
                     RETURN 
                         node.text AS text, 
                         'Claim:' + node.id AS source, 
@@ -46,7 +56,8 @@ class QAService:
                 """
                 claim_params = {
                     "topK": top_k,
-                    "queryVector": query_embedding
+                    "queryVector": query_embedding,
+                    "threshold": similarity_threshold
                 }
                 claim_results = neo4j_client.execute_query(claim_query, claim_params)
                 for record in claim_results:
@@ -67,7 +78,7 @@ class QAService:
                 chunk_query = """
                     CALL db.index.vector.queryNodes('chunk_embeddings', $topK, $queryVector)
                     YIELD node, score
-                    WHERE node.embedding IS NOT NULL AND node.text IS NOT NULL
+                    WHERE node.embedding IS NOT NULL AND node.text IS NOT NULL AND score >= $threshold
                     RETURN 
                         node.text AS text, 
                         'Chunk:' + coalesce(node.section_path, node.id) AS source, 
@@ -78,7 +89,8 @@ class QAService:
                 """
                 chunk_params = {
                     "topK": top_k,
-                    "queryVector": query_embedding
+                    "queryVector": query_embedding,
+                    "threshold": similarity_threshold
                 }
                 chunk_results = neo4j_client.execute_query(chunk_query, chunk_params)
                 for record in chunk_results:
@@ -99,7 +111,7 @@ class QAService:
                 concept_query = """
                     CALL db.index.vector.queryNodes('concept_embeddings', $topK, $queryVector)
                     YIELD node, score
-                    WHERE node.embedding IS NOT NULL
+                    WHERE node.embedding IS NOT NULL AND score >= $threshold
                     RETURN 
                         node.name AS name,
                         node.description AS description,
@@ -110,7 +122,8 @@ class QAService:
                 """
                 concept_params = {
                     "topK": top_k,
-                    "queryVector": query_embedding
+                    "queryVector": query_embedding,
+                    "threshold": similarity_threshold
                 }
                 concept_results = neo4j_client.execute_query(concept_query, concept_params)
                 for record in concept_results:
@@ -153,7 +166,7 @@ class QAService:
             unique_results.sort(key=lambda x: x["similarity"], reverse=True)
             final_results = unique_results[:top_k]
             
-            logger.debug(f"[QA服务] 向量检索总计返回 {len(final_results)} 条结果")
+            logger.info(f"[QA服务] 向量检索: 原始{len(all_results)}条 → 阈值{similarity_threshold}过滤后{len(unique_results)}条 → 取top_{top_k}返回{len(final_results)}条")
             
             # 打印实际返回的内容用于调试
             for i, r in enumerate(final_results[:3]):
@@ -623,7 +636,8 @@ class QAService:
                 "success": True,
                 "answer": answer,
                 "used_context": used_kg,
-                "context_snippet": kg_context,  # 返回完整的参考信息
+                "context_snippet": kg_context,
+                "entities": kg_data.get("entities", []),
                 "error": None
             }
         
@@ -697,13 +711,13 @@ class QAService:
             
             messages = []
             
-            system_msg = """你是一个智能问答助手，专门基于提供的文档内容回答用户提出的问题。
+            system_msg = """你是一个智能问答助手，基于提供的文档内容和自身知识回答用户提出的问题。
 
 请按照以下指导原则：
-1. 首先参考提供的文档信息来答题
-2. 如果文档中有相关信息，优先使用这些信息
+1. 首先参考提供的文档信息来答题，优先使用文档中的事实和数据
+2. 如果文档信息不足以完整回答问题，可以结合自身知识库进行补充，但需要明确标注哪些内容来自文档、哪些是补充信息
 3. 提供清晰、准确和有组织的答案
-4. 如果信息不足，请说明并给出可能的解释
+4. 如果文档信息与自身知识存在冲突，以文档信息为准
 5. 答案应该简明扼要但足够详细
 6. 使用markdown格式使答案更易阅读"""
             
@@ -735,7 +749,8 @@ class QAService:
                 "success": True,
                 "answer": answer,
                 "used_context": used_vector,
-                "context_snippet": vector_context,  # 返回完整的参考信息
+                "context_snippet": vector_context,
+                "vector_results": vector_results if used_vector else [],
                 "error": None
             }
         

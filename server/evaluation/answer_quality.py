@@ -20,6 +20,9 @@ import json
 from datetime import datetime
 import numpy as np
 from numpy.random import RandomState
+from utils.logger import get_logger
+
+logger = get_logger("evaluation.answer_quality")
 
 try:
     from rouge_score import rouge_scorer
@@ -56,11 +59,13 @@ class PointwiseEvaluator:
         Returns:
             包含各维度评分和综合评分的字典
         """
+        has_expected_answer = expected and expected.strip() and expected != "未提供参考答案"
+        
         result = {
             "predicted": predicted,
             "expected": expected,
             "context": context,
-            "automatic": self._automatic_evaluation(predicted, expected),
+            "automatic": self._automatic_evaluation(predicted, expected) if has_expected_answer else self._get_default_automatic_score(),
             "fact_consistency": self._fact_consistency(predicted, context),
             "llm_judge": None,
             "overall_score": 0.0,
@@ -69,31 +74,46 @@ class PointwiseEvaluator:
         
         if self.judge_model:
             llm_results = []
-            for _ in range(num_samples):
-                sample = self._llm_based_evaluation(predicted, expected, context)
+            for i in range(num_samples):
+                logger.info(f"[评估] LLM评估采样 {i+1}/{num_samples}...")
+                sample = self._llm_based_evaluation(predicted, expected, context, has_expected_answer)
                 llm_results.append(sample)
             
             aggregated = self._aggregate_samples(llm_results)
             result["llm_judge"] = aggregated
             result["samples"] = llm_results if return_all_samples else None
         
-        result["overall_score"] = self._calculate_overall(result)
+        result["overall_score"] = self._calculate_overall(result, has_expected_answer)
+        
+        result["evaluation_mode"] = "full" if has_expected_answer else "llm_only"
+        if not has_expected_answer:
+            result["warning"] = "未提供期望答案，自动评估分数为0，总分仅基于LLM评分"
         
         return result
+    
+    def _get_default_automatic_score(self) -> Dict[str, float]:
+        """当没有参考答案时返回默认自动评分"""
+        return {
+            "semantic_similarity": 0.0,
+            "word_overlap": 0.0,
+            "keyword_coverage": 0.0,
+            "rouge_l": 0.0,
+            "score": 0.0
+        }
     
     def _automatic_evaluation(self, predicted: str, expected: str) -> Dict[str, float]:
         """自动化指标评估"""
         semantic_sim = self._semantic_similarity(predicted, expected)
         word_overlap = self._word_overlap_similarity(predicted, expected)
-        length_match = self._length_match(predicted, expected)
+        keyword_cov = self._keyword_coverage(predicted, expected)
         rouge_l = self._rouge_l_score(predicted, expected)
         
         return {
             "semantic_similarity": round(semantic_sim, 4),
             "word_overlap": round(word_overlap, 4),
-            "length_match": round(length_match, 4),
+            "keyword_coverage": round(keyword_cov, 4),
             "rouge_l": round(rouge_l, 4),
-            "score": round((semantic_sim * 0.35 + word_overlap * 0.2 + length_match * 0.15 + rouge_l * 0.3), 4)
+            "score": round((semantic_sim * 0.30 + word_overlap * 0.15 + keyword_cov * 0.30 + rouge_l * 0.25), 4)
         }
     
     def _rouge_l_score(self, text1: str, text2: str) -> float:
@@ -180,11 +200,42 @@ class PointwiseEvaluator:
         union = words1 | words2
         return len(intersection) / len(union) if union else 0.0
     
-    def _length_match(self, text1: str, text2: str) -> float:
-        len1, len2 = len(text1), len(text2)
-        if len1 == 0 and len2 == 0:
+    def _keyword_coverage(self, predicted: str, expected: str) -> float:
+        """关键词覆盖率：标准答案中的关键词被预测回答覆盖的比例"""
+        import re
+        
+        def extract_keywords(text: str) -> set:
+            stopwords = {
+                '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个',
+                '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好',
+                '自己', '这', '他', '她', '它', '们', '那', '些', '什么', '如何', '怎么', '哪',
+                '为什么', '可以', '能够', '应该', '需要', '通过', '进行', '使用', '实现', '包括',
+                'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+                'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+                'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
+                'used', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
+                'as', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
+                'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either',
+                'it', 'its', 'this', 'that', 'these', 'those', 'which', 'who', 'whom'
+            }
+            words = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]{2,}', text.lower())
+            keywords = set()
+            for w in words:
+                if len(w) >= 2 and w not in stopwords:
+                    keywords.add(w)
+            return keywords
+        
+        expected_keywords = extract_keywords(expected)
+        if not expected_keywords:
             return 1.0
-        return 1 - abs(len1 - len2) / max(len1, len2)
+        
+        predicted_lower = predicted.lower()
+        covered = 0
+        for kw in expected_keywords:
+            if kw in predicted_lower:
+                covered += 1
+        
+        return covered / len(expected_keywords)
     
     def _get_default_evaluation(self) -> Dict[str, Any]:
         """返回默认评估结果"""
@@ -198,9 +249,9 @@ class PointwiseEvaluator:
             "comment": "LLM评估失败，使用默认评分"
         }
     
-    def _llm_based_evaluation(self, predicted: str, expected: str, context: str = "") -> Dict[str, Any]:
+    def _llm_based_evaluation(self, predicted: str, expected: str, context: str = "", has_expected_answer: bool = True) -> Dict[str, Any]:
         """单次 LLM 评估"""
-        prompt = self._build_pointwise_prompt(predicted, expected, context)
+        prompt = self._build_pointwise_prompt(predicted, expected, context, has_expected_answer)
         
         try:
             response = self.judge_model.chat(prompt)
@@ -214,16 +265,42 @@ class PointwiseEvaluator:
                 if field not in result:
                     raise ValueError(f"缺少字段: {field}")
             
+            for field in required_fields[:-1]:
+                val = result.get(field, 0)
+                if not isinstance(val, (int, float)) or val < 1 or val > 5:
+                    logger.warning(f"评分字段 {field} 值异常: {val}，将限制在1-5范围内")
+                    result[field] = max(1, min(5, float(val) if isinstance(val, (int, float)) else 3))
+            
+            logger.info(f"[评估] LLM返回评分: accuracy={result['accuracy']}, completeness={result['completeness']}, relevance={result['relevance']}, expertise={result['expertise']}, explainability={result['explainability']}, overall={result['overall']}")
+            
             return result
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.warning(f"LLM评估 JSON 解析失败: {e}")
+            logger.warning(f"LLM返回内容: {response[:500] if 'response' in dir() else 'N/A'}")
             return self._get_default_evaluation()
-        except ValueError:
+        except ValueError as e:
+            logger.warning(f"LLM评估值错误: {e}")
             return self._get_default_evaluation()
-        except Exception:
+        except Exception as e:
+            logger.error(f"LLM评估异常: {e}")
+            import traceback
+            logger.debug(f"错误详情: {traceback.format_exc()}")
             return self._get_default_evaluation()
     
-    def _build_pointwise_prompt(self, predicted: str, expected: str, context: str = "") -> str:
+    def _build_pointwise_prompt(self, predicted: str, expected: str, context: str = "", has_expected_answer: bool = True) -> str:
         """构建 Pointwise 评分 Prompt（带评分锚点）"""
+        
+        if has_expected_answer:
+            reference_section = f"""
+# 参考答案
+{expected}
+"""
+        else:
+            reference_section = """
+# 参考答案
+（未提供参考答案，请根据问题本身和你的专业知识进行评估）
+"""
+        
         return f"""
 # 角色设定
 你是一名严格且公平的《软件工程》课程评审专家。你必须依据评分标准客观评分，不受回答长度、措辞风格等表面因素影响。
@@ -231,51 +308,59 @@ class PointwiseEvaluator:
 # 评分标准（1-5分）
 1. 准确性（Accuracy）：回答的事实是否正确，是否与《软件工程》课程知识体系一致
    - 1分：多处事实错误或严重偏离课程内容
+   - 2分：有较明显的事实错误
    - 3分：基本正确，但有少量不准确或含糊之处
+   - 4分：大部分正确，仅有微小瑕疵
    - 5分：完全正确，精确符合课程知识体系
 
 2. 完整性（Completeness）：回答是否覆盖了问题的所有关键要点
    - 1分：仅涉及少量要点，遗漏重要内容
+   - 2分：覆盖了部分要点，但遗漏较多
    - 3分：覆盖了大部分要点，但仍有明显缺失
+   - 4分：覆盖了绝大部分要点
    - 5分：全面覆盖所有关键要点，无重要遗漏
 
 3. 相关性（Relevance）：回答是否与问题直接相关
    - 1分：完全不相关或答非所问
+   - 2分：相关性较低，存在大量冗余内容
    - 3分：部分相关，存在冗余内容
+   - 4分：大部分相关，有少量冗余
    - 5分：高度相关，无冗余内容
 
 4. 专业性（Expertise）：是否正确使用了专业术语和概念
    - 1分：未使用专业术语，概念混淆
+   - 2分：专业术语使用较少或有错误
    - 3分：基本正确使用专业术语
-   - 5分：准确使用专业术语和概念
+   - 4分：较好地使用专业术语和概念
+   - 5分：准确使用专业术语和概念，展现专业深度
 
 5. 可解释性（Explainability）：是否清晰说明推理过程
    - 1分：推理过程完全不清晰
+   - 2分：推理过程较为混乱
    - 3分：部分说明推理过程
+   - 4分：推理过程较为清晰
    - 5分：清晰说明推理过程，逻辑严谨
 
 # 禁止事项
 - 回答长度不应影响评分，重点评估内容质量而非数量
-- 评分应基于参考答案和问题上下文进行对比
+- 不要因为回答较长就给高分，也不要因为回答较短就给低分
+- 评分要严格，不要轻易给满分5分
 
-# 输入
-问题上下文：{context}
-
-参考答案：
-{expected}
-
-待评估回答：
+# 问题上下文
+{context if context else "（无上下文信息）"}
+{reference_section}
+# 待评估回答
 {predicted}
 
 # 输出格式
-请严格按照以下JSON格式输出，不要添加任何其他内容：
+请严格按照以下JSON格式输出，不要添加任何其他内容（注意：评分必须是1-5之间的整数）：
 {{
-    "accuracy": 0,
-    "completeness": 0,
-    "relevance": 0,
-    "expertise": 0,
-    "explainability": 0,
-    "overall": 0,
+    "accuracy": 3,
+    "completeness": 3,
+    "relevance": 3,
+    "expertise": 3,
+    "explainability": 3,
+    "overall": 3,
     "comment": "简短评语（不超过50字）"
 }}
 """
@@ -296,16 +381,29 @@ class PointwiseEvaluator:
         aggregated["comment"] = f"基于 {len(samples)} 次评估的平均结果"
         aggregated["sample_std"] = {dim: round(np.std([s[dim] for s in samples]), 2) for dim in dimensions}
         
+        logger.info(f"[评估] 聚合评分: accuracy={aggregated['accuracy']}, completeness={aggregated['completeness']}, relevance={aggregated['relevance']}, expertise={aggregated['expertise']}, explainability={aggregated['explainability']}, overall={aggregated['overall']}")
+        
         return aggregated
     
-    def _calculate_overall(self, result: Dict[str, Any]) -> float:
-        auto_score = result["automatic"]["score"]
-        
+    def _calculate_overall(self, result: Dict[str, Any], has_expected_answer: bool = True) -> float:
         if result["llm_judge"]:
-            llm_score = result["llm_judge"]["overall"] / 5.0
-            return round((auto_score * 0.6 + llm_score * 0.4), 4)
+            llm_overall = result["llm_judge"]["overall"]
+            llm_score = llm_overall / 5.0
+            if has_expected_answer:
+                auto_score = result["automatic"]["score"]
+                final_score = round((auto_score * 0.4 + llm_score * 0.6), 4)
+                logger.info(f"[评估] 计算综合评分(有参考答案): auto={auto_score:.4f}, llm={llm_score:.4f}, final={final_score:.4f}")
+                return final_score
+            else:
+                logger.warning(f"[评估] ⚠️ 无参考答案，自动评估使用默认值0，总分=LLM评分={llm_score:.4f}（建议提供期望答案以启用完整评估）")
+                return round(llm_score, 4)
         else:
-            return auto_score
+            if has_expected_answer:
+                logger.info(f"[评估] 计算综合评分(仅自动评估): auto={result['automatic']['score']:.4f}")
+                return result["automatic"]["score"]
+            else:
+                logger.warning("[评估] ⚠️ 无参考答案且无LLM评分，返回默认分0.5")
+                return 0.5
 
 
 class PairwiseEvaluator:

@@ -118,7 +118,7 @@ class OpenAIClient(BaseAIClient):
         self.client = OpenAI(
             api_key=api_key,
             base_url=base_url,
-            timeout=30.0
+            timeout=180.0
         )
     
     def chat_completion(
