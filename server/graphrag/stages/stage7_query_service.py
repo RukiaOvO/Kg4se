@@ -382,7 +382,7 @@ class QueryService:
         claim_query = """
         CALL db.index.vector.queryNodes('claim_embeddings', $topK, $queryVector)
         YIELD node, score
-        WHERE node.embedding IS NOT NULL AND score >= $threshold
+        WHERE node.embedding IS NOT NULL AND score >= $threshold AND coalesce(node.confidence, 0.5) >= $confidenceThreshold
         RETURN node, score
         """
         
@@ -390,7 +390,8 @@ class QueryService:
         claim_results = neo4j_client.execute_query(claim_query, {
             "topK": top_k,
             "queryVector": question_embedding,
-            "threshold": self.similarity_threshold
+            "threshold": self.similarity_threshold,
+            "confidenceThreshold": 0.5
         })
         
         for record in claim_results:
@@ -668,6 +669,10 @@ class QueryService:
         
         # 按综合分数排序
         claim_candidates.sort(key=lambda x: x.score, reverse=True)
+        
+        # 过滤掉综合分数过低的候选
+        min_candidate_score = 0.3
+        claim_candidates = [c for c in claim_candidates if c.score >= min_candidate_score]
         
         # 返回 Top-K
         return claim_candidates[:top_k]

@@ -53,41 +53,36 @@
                   <div class="radar-left">
                     <div class="formula-subtitle">
                       <span class="sub-label">综合评分公式</span>
-                      <code>S = 0.4 × A<sub>自动评估</sub> + 0.6 × L<sub>LLM评分</sub></code>
+                      <code>S = 0.4&times;A + 0.4&times;L + 0.2&times;C</code>
                     </div>
-                    <div class="radar-chart-card">
-                      <div class="radar-chart-inner">
-                        <v-chart :option="getCombinedRadarOption" autoresize class="combined-radar-chart" />
-                        <div class="radar-legend-vertical">
-                          <div class="rv-item graphrag-legend">
-                            <span class="rv-dot"></span>
-                            <span class="rv-label">GraphRAG</span>
-                          </div>
-                          <div class="rv-item rag-legend">
-                            <span class="rv-dot"></span>
-                            <span class="rv-label">RAG</span>
-                          </div>
-                          <div class="rv-item llm-legend">
-                            <span class="rv-dot"></span>
-                            <span class="rv-label">LLM</span>
-                          </div>
-                        </div>
+                    <div class="radar-charts-row">
+                      <div class="radar-chart-item graphrag-chart">
+                        <div class="radar-chart-label">GraphRAG</div>
+                        <v-chart :option="getGraphragRadarOption" autoresize class="single-radar-chart" />
+                      </div>
+                      <div class="radar-chart-item rag-chart">
+                        <div class="radar-chart-label">RAG</div>
+                        <v-chart :option="getRagRadarOption" autoresize class="single-radar-chart" />
+                      </div>
+                      <div class="radar-chart-item llm-chart">
+                        <div class="radar-chart-label">LLM</div>
+                        <v-chart :option="getLlmRadarOption" autoresize class="single-radar-chart" />
                       </div>
                     </div>
                     <div class="total-score-row">
                       <div class="total-item graphrag-total">
                         <span class="total-label">GraphRAG</span>
-                        <span class="total-calc">0.4&times;{{ getAutoScore('graphrag') }} + 0.6&times;{{ getLlmScore('graphrag') }}</span>
+                        <span class="total-calc">0.4&times;{{ getAutoScore('graphrag') }} + 0.4&times;{{ getLlmScore('graphrag') }} + 0.2&times;{{ getCredibilityScore('graphrag') }}</span>
                         <span class="total-value">{{ (answerEvaluation.evaluation.statistics.graphrag_score * 100).toFixed(2) }}</span>
                       </div>
                       <div class="total-item rag-total">
                         <span class="total-label">RAG</span>
-                        <span class="total-calc">0.4&times;{{ getAutoScore('rag') }} + 0.6&times;{{ getLlmScore('rag') }}</span>
+                        <span class="total-calc">0.4&times;{{ getAutoScore('rag') }} + 0.4&times;{{ getLlmScore('rag') }} + 0.2&times;{{ getCredibilityScore('rag') }}</span>
                         <span class="total-value">{{ (answerEvaluation.evaluation.statistics.rag_score * 100).toFixed(2) }}</span>
                       </div>
                       <div class="total-item llm-total">
                         <span class="total-label">LLM</span>
-                        <span class="total-calc">0.4&times;{{ getAutoScore('llm') }} + 0.6&times;{{ getLlmScore('llm') }}</span>
+                        <span class="total-calc">0.4&times;{{ getAutoScore('llm') }} + 0.4&times;{{ getLlmScore('llm') }} + 0.2&times;{{ getCredibilityScore('llm') }}</span>
                         <span class="total-value">{{ (answerEvaluation.evaluation.statistics.llm_score * 100).toFixed(2) }}</span>
                       </div>
                     </div>
@@ -121,12 +116,12 @@
                     <n-tabs type="line" animated size="small" class="eval-tabs">
                       <n-tab-pane name="auto" tab="自动评估标准">
                         <div class="tab-content">
-                          <div class="tab-subtitle">基于文本相似度的自动化指标</div>
+                          <div class="tab-subtitle">基于长度和文本匹配的自动化指标</div>
                           <div class="formula-list">
                             <div class="formula-list-item">
-                              <span class="fl-label">语义相似度</span>
-                              <div class="fl-value"><code>Cosine(v<sub>1</sub>, v<sub>2</sub>)</code></div>
-                              <span class="fl-desc">向量余弦相似度</span>
+                              <span class="fl-label">长度评分</span>
+                              <div class="fl-value"><code>log<sub>10</sub>(1+L) / log<sub>10</sub>(1+3R)</code></div>
+                              <span class="fl-desc">对数长度（边际递减）</span>
                             </div>
                             <div class="formula-list-item">
                               <span class="fl-label">词重叠率</span>
@@ -146,10 +141,10 @@
                           </div>
                           <div class="formula-total">
                             <span class="ft-label">自动评估总分 A</span>
-                            <div class="ft-value"><code>A = 0.3&times;Sim + 0.15&times;WOR + 0.3&times;KC + 0.25&times;RL</code></div>
+                            <div class="ft-value"><code>A = 0.3&times;Len + 0.15&times;WOR + 0.3&times;KC + 0.25&times;RL</code></div>
                           </div>
                           <div class="tab-score-section">
-                            <div class="tss-header">各方法自动评估分数 A</div>
+                            <div class="tss-header">各方法分数 A</div>
                             <div class="tss-body">
                               <div class="tss-row">
                                 <span class="tss-dot" style="background:#52c41a"></span>
@@ -194,7 +189,7 @@
                             <div class="ft-value"><code>L = &Sigma;(dim<sub>i</sub>) / 5, dim &isin; [1,5]</code></div>
                           </div>
                           <div class="tab-score-section">
-                            <div class="tss-header">各方法LLM评分 L</div>
+                            <div class="tss-header">各方法分数 L</div>
                             <div class="tss-body">
                               <div class="tss-row">
                                 <span class="tss-dot" style="background:#52c41a"></span>
@@ -210,6 +205,63 @@
                                 <span class="tss-dot" style="background:#1890ff"></span>
                                 <span class="tss-name">LLM</span>
                                 <span class="tss-score" style="color:#1890ff">{{ getLlmScore('llm') }}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </n-tab-pane>
+                      <n-tab-pane name="credibility" tab="可信度 C">
+                        <div class="tab-content">
+                          <div class="tab-subtitle">信息可信度：评估回答是否有外部知识支撑</div>
+                          <div class="credibility-concept">
+                            <div class="cc-item">
+                              <span class="cc-icon">&#128218;</span>
+                              <div class="cc-text">
+                                <span class="cc-title">有外部知识</span>
+                                <span class="cc-desc">回答基于知识图谱或文档检索结果，具有事实依据</span>
+                              </div>
+                            </div>
+                            <div class="cc-item">
+                              <span class="cc-icon">&#128172;</span>
+                              <div class="cc-text">
+                                <span class="cc-title">无外部知识</span>
+                                <span class="cc-desc">回答完全依靠模型参数化记忆，可能包含幻觉</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="formula-list">
+                            <div class="formula-list-item">
+                              <span class="fl-label">有上下文</span>
+                              <div class="fl-value"><code>C = 0.4 + 0.6 &times; overlap</code></div>
+                              <span class="fl-desc">上下文引用率</span>
+                            </div>
+                            <div class="formula-list-item">
+                              <span class="fl-label">无上下文</span>
+                              <div class="fl-value"><code>C = 0.15</code></div>
+                              <span class="fl-desc">无事实依据</span>
+                            </div>
+                          </div>
+                          <div class="credibility-note">
+                            <span class="cn-label">公平性说明</span>
+                            <span class="cn-text">所有方法使用同一公式，差异仅来自是否拥有外部知识上下文及引用程度，与方法类型无关</span>
+                          </div>
+                          <div class="tab-score-section">
+                            <div class="tss-header">各方法分数 C</div>
+                            <div class="tss-body">
+                              <div class="tss-row">
+                                <span class="tss-dot" style="background:#52c41a"></span>
+                                <span class="tss-name">GraphRAG</span>
+                                <span class="tss-score" style="color:#52c41a">{{ getCredibilityScore('graphrag') }}</span>
+                              </div>
+                              <div class="tss-row">
+                                <span class="tss-dot" style="background:#faad14"></span>
+                                <span class="tss-name">RAG</span>
+                                <span class="tss-score" style="color:#faad14">{{ getCredibilityScore('rag') }}</span>
+                              </div>
+                              <div class="tss-row">
+                                <span class="tss-dot" style="background:#1890ff"></span>
+                                <span class="tss-name">LLM</span>
+                                <span class="tss-score" style="color:#1890ff">{{ getCredibilityScore('llm') }}</span>
                               </div>
                             </div>
                           </div>
@@ -233,7 +285,9 @@
                       <n-tag type="success" bordered>GraphRAG</n-tag>
                       <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.graphrag_score * 100).toFixed(1) }}</span>
                     </div>
-                    <div class="answer-content">{{ answerEvaluation.graphrag_answer }}</div>
+                    <div class="answer-content markdown-content">
+                      <Markdown :source="answerEvaluation.graphrag_answer" />
+                    </div>
                   </div>
 
                   <div class="answer-card rag">
@@ -241,7 +295,9 @@
                       <n-tag type="warning" bordered>RAG</n-tag>
                       <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.rag_score * 100).toFixed(1) }}</span>
                     </div>
-                    <div class="answer-content">{{ answerEvaluation.rag_answer }}</div>
+                    <div class="answer-content markdown-content">
+                      <Markdown :source="answerEvaluation.rag_answer" />
+                    </div>
                   </div>
 
                   <div class="answer-card llm">
@@ -249,7 +305,9 @@
                       <n-tag type="info" bordered>LLM</n-tag>
                       <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.llm_score * 100).toFixed(1) }}</span>
                     </div>
-                    <div class="answer-content">{{ answerEvaluation.llm_answer }}</div>
+                    <div class="answer-content markdown-content">
+                      <Markdown :source="answerEvaluation.llm_answer" />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -377,33 +435,35 @@ const dimLabels = {
   explainability: '可解释性'
 }
 
-const getCombinedRadarOption = computed(() => {
-  if (!answerEvaluation.value?.evaluation) return { series: [] }
+const getSingleRadarOption = (method, color, bgColor) => {
+  if (!answerEvaluation.value?.evaluation?.[method]?.llm_judge) return { series: [] }
   
-  const evalData = answerEvaluation.value.evaluation
-  
-  const getScores = (method) => {
-    if (!evalData[method]?.llm_judge) return llmJudgeDimensions.map(() => 0)
-    return llmJudgeDimensions.map(dim => evalData[method].llm_judge[dim] ?? 0)
-  }
+  const llmJudge = answerEvaluation.value.evaluation[method].llm_judge
+  const scores = llmJudgeDimensions.map(dim => llmJudge[dim] ?? 0)
+  const methodNames = { graphrag: 'GraphRAG', rag: 'RAG', llm: 'LLM' }
   
   return {
     tooltip: {
       trigger: 'item',
-      confine: true
+      confine: true,
+      formatter: (params) => {
+        let html = `<b>${methodNames[method]}</b><br/>`
+        params.value.forEach((v, i) => {
+          html += `${dimLabels[llmJudgeDimensions[i]]}: ${v}<br/>`
+        })
+        return html
+      }
     },
-    legend: {
-      show: false
-    },
+    legend: { show: false },
     radar: {
       indicator: llmJudgeDimensions.map(dim => ({ name: dimLabels[dim], max: 5 })),
       shape: 'polygon',
       splitNumber: 5,
-      center: ['45%', '50%'],
-      radius: '65%',
+      center: ['50%', '50%'],
+      radius: '70%',
       axisName: {
         color: '#444',
-        fontSize: 12,
+        fontSize: 11,
         fontWeight: 500
       },
       splitLine: {
@@ -411,7 +471,7 @@ const getCombinedRadarOption = computed(() => {
       },
       splitArea: {
         areaStyle: {
-          color: ['rgba(82,196,26,0.02)', 'rgba(250,173,20,0.02)', 'rgba(24,144,255,0.02)']
+          color: ['rgba(0,0,0,0.01)', 'rgba(0,0,0,0.02)']
         }
       },
       axisLine: {
@@ -420,32 +480,22 @@ const getCombinedRadarOption = computed(() => {
     },
     series: [{
       type: 'radar',
-      data: [
-        {
-          value: getScores('graphrag'),
-          name: 'GraphRAG',
-          areaStyle: { color: 'rgba(82,196,26,0.25)' },
-          lineStyle: { color: '#52c41a', width: 2 },
-          itemStyle: { color: '#52c41a' }
-        },
-        {
-          value: getScores('rag'),
-          name: 'RAG',
-          areaStyle: { color: 'rgba(250,173,20,0.25)' },
-          lineStyle: { color: '#faad14', width: 2 },
-          itemStyle: { color: '#faad14' }
-        },
-        {
-          value: getScores('llm'),
-          name: 'LLM',
-          areaStyle: { color: 'rgba(24,144,255,0.25)' },
-          lineStyle: { color: '#1890ff', width: 2 },
-          itemStyle: { color: '#1890ff' }
-        }
-      ]
+      data: [{
+        value: scores,
+        name: methodNames[method],
+        areaStyle: { color: bgColor },
+        lineStyle: { color: color, width: 2 },
+        itemStyle: { color: color },
+        symbol: 'circle',
+        symbolSize: 5
+      }]
     }]
   }
-})
+}
+
+const getGraphragRadarOption = computed(() => getSingleRadarOption('graphrag', '#52c41a', 'rgba(82,196,26,0.25)'))
+const getRagRadarOption = computed(() => getSingleRadarOption('rag', '#faad14', 'rgba(250,173,20,0.25)'))
+const getLlmRadarOption = computed(() => getSingleRadarOption('llm', '#1890ff', 'rgba(24,144,255,0.25)'))
 
 const evaluateAnswer = async () => {
   if (!question.value.trim()) return
@@ -498,6 +548,12 @@ const getLlmScore = (method) => {
   if (!answerEvaluation.value?.evaluation?.[method]?.llm_judge) return '-'
   const overall = answerEvaluation.value.evaluation[method].llm_judge.overall
   return ((overall / 5) * 100).toFixed(1)
+}
+
+const getCredibilityScore = (method) => {
+  if (!answerEvaluation.value?.evaluation?.[method]) return '-'
+  const credibility = answerEvaluation.value.evaluation[method].info_credibility
+  return (credibility * 100).toFixed(1)
 }
 
 const dimDescriptions = {
@@ -695,63 +751,34 @@ const scoreScaleList = [
     }
   }
 
-  .radar-chart-card {
+  .radar-charts-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .radar-chart-item {
     background: white;
     border-radius: 12px;
-    padding: 16px;
+    padding: 12px 8px 8px;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
-  }
+    text-align: center;
 
-  .radar-chart-inner {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-  }
-
-  .combined-radar-chart {
-    width: 100%;
-    height: 300px;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .radar-legend-vertical {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding-left: 8px;
-    margin-left: 4px;
-    border-left: 2px solid #f0f0f0;
-    flex-shrink: 0;
-
-    .rv-item {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 600;
-
-      .rv-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 3px;
-        flex-shrink: 0;
-      }
-
-      .rv-label {
-        white-space: nowrap;
-      }
-
-      &.graphrag-legend { color: #52c41a; }
-      &.graphrag-legend .rv-dot { background: #52c41a; }
-
-      &.rag-legend { color: #faad14; }
-      &.rag-legend .rv-dot { background: #faad14; }
-
-      &.llm-legend { color: #1890ff; }
-      &.llm-legend .rv-dot { background: #1890ff; }
+    .radar-chart-label {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 4px;
     }
+
+    &.graphrag-chart .radar-chart-label { color: #52c41a; }
+    &.rag-chart .radar-chart-label { color: #faad14; }
+    &.llm-chart .radar-chart-label { color: #1890ff; }
+  }
+
+  .single-radar-chart {
+    width: 100%;
+    height: 240px;
   }
 
   .total-score-row {
@@ -857,6 +884,18 @@ const scoreScaleList = [
     padding: 16px;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
     height: 100%;
+    min-height: 480px;
+    display: flex;
+    flex-direction: column;
+
+    :deep(.n-tabs-nav) {
+      flex-shrink: 0;
+    }
+
+    :deep(.n-tabs-pane-wrapper) {
+      flex: 1;
+      overflow-y: auto;
+    }
 
     :deep(.n-tabs-tab) {
       font-weight: 600;
@@ -918,6 +957,70 @@ const scoreScaleList = [
         color: #999;
         white-space: nowrap;
       }
+    }
+  }
+
+  .credibility-concept {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 14px;
+
+    .cc-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px 12px;
+      background: #fafafa;
+      border-radius: 8px;
+
+      .cc-icon {
+        font-size: 20px;
+        line-height: 1;
+        flex-shrink: 0;
+        margin-top: 2px;
+      }
+
+      .cc-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+
+        .cc-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: #333;
+        }
+
+        .cc-desc {
+          font-size: 11px;
+          color: #888;
+          line-height: 1.4;
+        }
+      }
+    }
+  }
+
+  .credibility-note {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 14px;
+    margin-top: 4px;
+    background: linear-gradient(135deg, #f0fff0, #f5fff5);
+    border-radius: 8px;
+    border-left: 3px solid #52c41a;
+
+    .cn-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+    }
+
+    .cn-text {
+      font-size: 11px;
+      color: #777;
+      line-height: 1.5;
     }
   }
 
@@ -1266,6 +1369,95 @@ const scoreScaleList = [
     color: #444;
     min-height: 60px;
   }
+
+  .markdown-content {
+    h1, h2, h3, h4 {
+      margin: 12px 0 8px;
+      font-weight: 600;
+      color: #333;
+    }
+    h1 { font-size: 18px; }
+    h2 { font-size: 16px; }
+    h3 { font-size: 15px; }
+    h4 { font-size: 14px; }
+
+    p {
+      margin: 0 0 8px;
+      line-height: 1.7;
+    }
+
+    ul, ol {
+      margin: 4px 0 8px;
+      padding-left: 20px;
+    }
+
+    li {
+      margin: 2px 0;
+      line-height: 1.6;
+    }
+
+    code {
+      font-size: 13px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(0,0,0,0.06);
+      color: #d63384;
+      font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    }
+
+    pre {
+      margin: 8px 0;
+      padding: 12px;
+      border-radius: 8px;
+      background: #1e1e1e;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.5;
+
+      code {
+        background: none;
+        color: #d4d4d4;
+        padding: 0;
+      }
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0;
+      font-size: 13px;
+    }
+
+    th, td {
+      padding: 6px 10px;
+      border: 1px solid #e0e0e0;
+      text-align: left;
+    }
+
+    th {
+      background: #f5f5f5;
+      font-weight: 600;
+    }
+
+    blockquote {
+      margin: 8px 0;
+      padding: 6px 12px;
+      border-left: 3px solid #d4af37;
+      background: #fafafa;
+      color: #666;
+    }
+
+    strong {
+      font-weight: 700;
+      color: #333;
+    }
+
+    a {
+      color: #1890ff;
+      text-decoration: none;
+      &:hover { text-decoration: underline; }
+    }
+  }
 }
 
 @keyframes fadeInUp {
@@ -1303,7 +1495,11 @@ const scoreScaleList = [
     }
   }
   
-  .combined-radar-chart {
+  .radar-section .radar-charts-row {
+    grid-template-columns: 1fr;
+  }
+  
+  .single-radar-chart {
     height: 280px;
   }
 }

@@ -30,7 +30,7 @@ class RedisQueue:
         Args:
             redis_url: Redis connection URL (defaults to settings.redis_url)
         """
-        from infra.config import settings
+        from config import settings
         self.redis_url = redis_url or settings.redis_url
         
         # Windows 系统不支持 RQ，直接使用内存存储

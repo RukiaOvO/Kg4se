@@ -20,7 +20,7 @@ from services.graph_service import GraphService
 from services.graphrag_pipeline_service import graphrag_pipeline_service
 from models.document import AIExtractionRequest
 from infra.queue import get_queue
-from infra.config import settings
+from config import settings
 from config import get_instance, InstanceNames
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])

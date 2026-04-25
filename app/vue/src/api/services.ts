@@ -455,7 +455,7 @@ export interface MethodEvaluation {
   expected: string
   context: string
   automatic: AutomaticEvaluation
-  fact_consistency: number
+  info_credibility: number
   llm_judge: LLMJudgeResult | null
   overall_score: number
   samples: any[] | null

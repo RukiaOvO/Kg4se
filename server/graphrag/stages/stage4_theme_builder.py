@@ -922,30 +922,33 @@ class ThemeBuilder:
                 logger.warning("Level 2 子图投影：未找到节点")
                 return {}
             
-            # 创建子图投影（使用 gds.graph.project 直接投影，避免 id() 弃用警告）
-            create_subgraph_query = f"""
+            # 创建子图投影（使用参数化查询传递节点ID）
+            create_subgraph_query = """
             MATCH (c:Concept)
-            WHERE elementId(c) IN {node_ids_str}
+            WHERE elementId(c) IN $node_ids
             WITH collect(c) AS nodes
             UNWIND nodes AS n
-            CALL {{
+            CALL {
                 WITH n
                 MATCH (n)-[r:RELATED_TO]-(m:Concept)
-                WHERE elementId(m) IN {node_ids_str}
+                WHERE elementId(m) IN $node_ids
                 RETURN r, m
-            }}
+            }
             WITH collect(DISTINCT n) AS final_nodes, collect(DISTINCT r) AS rels
             CALL gds.graph.project.cypher(
-                '{subgraph_name}',
+                $subgraph_name,
                 'UNWIND $nodes AS id MATCH (c) WHERE elementId(c) = id RETURN elementId(c) AS id',
                 'UNWIND $rels AS id MATCH ()-[r]->() WHERE elementId(r) = id RETURN elementId(startNode(r)) AS source, elementId(endNode(r)) AS target, COALESCE(r.weight, 1.0) AS weight',
-                {{parameters: {{nodes: [x IN final_nodes | elementId(x)], rels: [r IN rels | elementId(r)]}}}}
+                {parameters: {nodes: [x IN final_nodes | elementId(x)], rels: [r IN rels | elementId(r)]}}
             )
             YIELD graphName, nodeCount, relationshipCount
             RETURN graphName, nodeCount, relationshipCount
             """
             
-            neo4j_client.execute_query(create_subgraph_query, {})
+            neo4j_client.execute_query(create_subgraph_query, {
+                "node_ids": node_ids,
+                "subgraph_name": subgraph_name
+            })
             
             # 在子图上运行 Louvain（应用优化参数）
             louvain_config = self.thresholds.get("louvain", {})

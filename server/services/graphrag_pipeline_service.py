@@ -18,7 +18,7 @@ from graphrag.stages.pipeline import (
     PipelineResult,
     create_pipeline
 )
-from infra.config import settings
+from config import settings
 from infra.neo4j_client import neo4j_client
 
 logger = logging.getLogger("services.graphrag_pipeline_service")

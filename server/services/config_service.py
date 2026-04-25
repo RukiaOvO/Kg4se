@@ -1,7 +1,7 @@
 """Runtime configuration service using Neo4j as storage."""
 from typing import Optional, Dict, Any
 from infra.neo4j_client import neo4j_client
-from infra.config import settings as base_settings
+from config import settings as base_settings
 
 
 class ConfigService:
@@ -134,6 +134,30 @@ class ConfigService:
         elif provider == "ollama" and not base_url:
             base_url = runtime_config.get("ollama_base_url")
             model = model or runtime_config.get("ollama_model")
+        
+        return {
+            "provider": provider,
+            "api_key": api_key,
+            "model": model,
+            "base_url": base_url
+        }
+    
+    def get_judge_provider_config(self) -> Dict[str, Any]:
+        """
+        Get judge/evaluation AI provider configuration.
+        
+        Uses JUDGE_MODEL/JUDGE_API_KEY from settings when available,
+        falls back to the main AI provider config.
+        
+        Returns:
+            Dictionary with provider, api_key, model, base_url.
+        """
+        runtime_config = self.get_runtime_config()
+        provider = runtime_config.get("ai_provider", "mock")
+        
+        api_key = base_settings.judge_api_key or runtime_config.get("ai_api_key")
+        model = base_settings.judge_model or runtime_config.get("ai_model")
+        base_url = base_settings.judge_base_url or runtime_config.get("ai_base_url")
         
         return {
             "provider": provider,

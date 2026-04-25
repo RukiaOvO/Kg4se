@@ -77,6 +77,81 @@ class TestPointwiseEvaluator:
         assert "rouge_l" in result
         assert "score" in result
         assert 0 <= result["score"] <= 1
+    
+    def test_information_credibility_no_context(self):
+        """测试无外部知识上下文时信息可信度为低分"""
+        evaluator = PointwiseEvaluator()
+        score = evaluator._information_credibility(
+            predicted="LLM回答", context="", used_context=False, source_type="llm"
+        )
+        assert score == 0.15
+
+    def test_information_credibility_with_context(self):
+        """测试有上下文时信息可信度根据overlap计算"""
+        evaluator = PointwiseEvaluator()
+        score = evaluator._information_credibility(
+            predicted="知识图谱中的实体和关系",
+            context="知识图谱中的实体和关系信息",
+            used_context=True,
+            source_type="graphrag"
+        )
+        assert 0.4 <= score <= 1.0
+
+    def test_information_credibility_rag_with_context(self):
+        """测试RAG有上下文时信息可信度与GraphRAG使用同一公式"""
+        evaluator = PointwiseEvaluator()
+        score = evaluator._information_credibility(
+            predicted="文档检索的回答内容",
+            context="检索到的文档片段内容",
+            used_context=True,
+            source_type="rag"
+        )
+        assert 0.4 <= score <= 1.0
+
+    def test_information_credibility_no_context_graphrag(self):
+        """测试GraphRAG未检索到上下文时信息可信度同样为低分"""
+        evaluator = PointwiseEvaluator()
+        score = evaluator._information_credibility(
+            predicted="回答", context="", used_context=False, source_type="graphrag"
+        )
+        assert score == 0.15
+
+    def test_information_credibility_same_formula(self):
+        """测试同一公式对所有方法公平：相同输入得到相同输出"""
+        evaluator = PointwiseEvaluator()
+        predicted = "基于知识库的回答内容"
+        context = "知识库中的回答内容参考"
+        score_gr = evaluator._information_credibility(predicted, context, True, "graphrag")
+        score_rag = evaluator._information_credibility(predicted, context, True, "rag")
+        score_llm = evaluator._information_credibility(predicted, context, True, "llm")
+        assert score_gr == score_rag == score_llm
+    
+    def test_overall_score_with_credibility(self):
+        """测试综合评分包含信息可信度"""
+        mock_llm = Mock()
+        mock_llm.chat.return_value = json.dumps({
+            "accuracy": 4,
+            "completeness": 4,
+            "relevance": 5,
+            "expertise": 4,
+            "explainability": 4,
+            "overall": 4.2,
+            "comment": "测试"
+        })
+        
+        evaluator = PointwiseEvaluator(llm_client=mock_llm)
+        result = evaluator.evaluate(
+            predicted="这是测试回答",
+            expected="这是参考答案",
+            context="上下文信息",
+            num_samples=1,
+            source_type="graphrag",
+            used_context=True
+        )
+        
+        assert "info_credibility" in result
+        assert result["info_credibility"] >= 0.4
+        assert result["overall_score"] > 0
 
 
 class TestPairwiseEvaluator:

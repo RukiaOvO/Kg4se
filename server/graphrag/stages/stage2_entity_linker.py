@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from graphrag.models.chunk import ChunkMetadata
 from graphrag.config import get_config
 from infra.neo4j_client import neo4j_client
-from infra.config import settings
+from config import settings
 from services.config_service import config_service
 from graphrag.utils.embedding import get_embedding, cosine_similarity
 from graphrag.utils.domain_filter import get_domain_filter

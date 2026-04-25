@@ -17,6 +17,8 @@ LLM-as-a-Judge 评估模块 - 全面优化版
 
 from typing import Dict, Any, List, Optional, Callable
 import json
+import re
+import math
 from datetime import datetime
 import numpy as np
 from numpy.random import RandomState
@@ -29,6 +31,12 @@ try:
     ROUGE_AVAILABLE = True
 except ImportError:
     ROUGE_AVAILABLE = False
+
+try:
+    import jieba
+    JIEBA_AVAILABLE = True
+except ImportError:
+    JIEBA_AVAILABLE = False
 
 
 class PointwiseEvaluator:
@@ -45,7 +53,9 @@ class PointwiseEvaluator:
                  expected: str, 
                  context: str = "",
                  num_samples: int = 3,
-                 return_all_samples: bool = False) -> Dict[str, Any]:
+                 return_all_samples: bool = False,
+                 source_type: str = "llm",
+                 used_context: bool = False) -> Dict[str, Any]:
         """
         评估单个回答质量
         
@@ -55,6 +65,8 @@ class PointwiseEvaluator:
             context: 问题上下文
             num_samples: 采样次数（缓解随机性）
             return_all_samples: 是否返回所有采样结果
+            source_type: 回答来源类型 (graphrag/rag/llm)
+            used_context: 是否使用了外部知识上下文
         
         Returns:
             包含各维度评分和综合评分的字典
@@ -66,7 +78,7 @@ class PointwiseEvaluator:
             "expected": expected,
             "context": context,
             "automatic": self._automatic_evaluation(predicted, expected) if has_expected_answer else self._get_default_automatic_score(),
-            "fact_consistency": self._fact_consistency(predicted, context),
+            "info_credibility": self._information_credibility(predicted, context, used_context, source_type),
             "llm_judge": None,
             "overall_score": 0.0,
             "samples": []
@@ -103,17 +115,17 @@ class PointwiseEvaluator:
     
     def _automatic_evaluation(self, predicted: str, expected: str) -> Dict[str, float]:
         """自动化指标评估"""
-        semantic_sim = self._semantic_similarity(predicted, expected)
+        length_score = self._length_score(predicted, expected)
         word_overlap = self._word_overlap_similarity(predicted, expected)
         keyword_cov = self._keyword_coverage(predicted, expected)
         rouge_l = self._rouge_l_score(predicted, expected)
         
         return {
-            "semantic_similarity": round(semantic_sim, 4),
+            "semantic_similarity": round(length_score, 4),
             "word_overlap": round(word_overlap, 4),
             "keyword_coverage": round(keyword_cov, 4),
             "rouge_l": round(rouge_l, 4),
-            "score": round((semantic_sim * 0.30 + word_overlap * 0.15 + keyword_cov * 0.30 + rouge_l * 0.25), 4)
+            "score": round((length_score * 0.30 + word_overlap * 0.15 + keyword_cov * 0.30 + rouge_l * 0.25), 4)
         }
     
     def _rouge_l_score(self, text1: str, text2: str) -> float:
@@ -127,41 +139,38 @@ class PointwiseEvaluator:
         except Exception:
             return self._simple_similarity(text1, text2)
     
-    def _fact_consistency(self, predicted: str, context: str) -> float:
-        """检测回答与上下文的事实一致性"""
-        if not context or not predicted:
-            return 1.0
+    def _length_score(self, predicted: str, expected: str) -> float:
+        """基于回答长度的评分，越长分数越高，使用对数函数体现边际效益递减"""
+        if not predicted:
+            return 0.0
         
-        try:
-            if self.judge_model:
-                prompt = self._build_fact_consistency_prompt(context, predicted)
-                response = self.judge_model.chat(prompt)
-                try:
-                    score = float(response.strip())
-                    return max(0.0, min(1.0, score))
-                except ValueError:
-                    return 0.7
-            else:
-                return 0.7
-        except Exception:
-            return 0.7
+        pred_len = len(predicted)
+        expected_len = max(len(expected) if expected else 0, 300)
+        
+        score = math.log10(1 + pred_len) / math.log10(1 + expected_len * 3)
+        return min(1.0, max(0.0, score))
     
-    def _build_fact_consistency_prompt(self, context: str, predicted: str) -> str:
-        """构建事实一致性检测 Prompt"""
-        return f"""
-请判断以下回答是否与上下文信息一致：
-
-上下文: {context[:1000]}
-
-回答: {predicted[:1000]}
-
-请输出一个0到1之间的分数，表示一致性程度：
-- 1.0 = 完全一致，所有陈述都符合上下文
-- 0.5 = 部分一致，部分内容符合上下文
-- 0.0 = 完全矛盾，存在明显事实错误
-
-只输出数字，不要输出其他内容。
-"""
+    def _information_credibility(self, predicted: str, context: str, used_context: bool, source_type: str) -> float:
+        """信息可信度评估：基于回答是否有外部知识支撑及对上下文的引用程度
+        
+        公平公式：所有方法使用同一计算逻辑
+        - 有外部知识上下文且被使用: C = 0.4 + 0.6 × overlap (最高1.0)
+        - 无外部知识上下文: C = 0.15
+        
+        GraphRAG/RAG 因检索到上下文自然得高分，LLM 因无上下文自然得低分
+        """
+        if not used_context or not context or not context.strip():
+            return 0.15
+        
+        overlap_ratio = 0.0
+        if predicted:
+            context_tokens = self._tokenize(context)
+            predicted_tokens = self._tokenize(predicted)
+            if context_tokens and predicted_tokens:
+                overlap_ratio = len(context_tokens & predicted_tokens) / len(predicted_tokens)
+        
+        credibility = 0.4 + 0.6 * min(1.0, overlap_ratio)
+        return round(min(1.0, credibility), 4)
     
     def _semantic_similarity(self, text1: str, text2: str) -> float:
         if not self.embedding_model:
@@ -171,7 +180,7 @@ class PointwiseEvaluator:
             emb1 = self.embedding_model.encode(text1)
             emb2 = self.embedding_model.encode(text2)
             return np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
-        except:
+        except Exception:
             return self._simple_similarity(text1, text2)
     
     def _simple_similarity(self, text1: str, text2: str) -> float:
@@ -179,21 +188,60 @@ class PointwiseEvaluator:
         if not text1 or not text2:
             return 0.0
         
+        MAX_LEN = 2000
+        text1, text2 = text1[:MAX_LEN], text2[:MAX_LEN]
+        
         len1, len2 = len(text1), len(text2)
-        dp = [[0] * (len2 + 1) for _ in range(len1 + 1)]
+        if len1 == 0 or len2 == 0:
+            return 0.0
+        
+        prev = [0] * (len2 + 1)
+        curr = [0] * (len2 + 1)
         
         for i in range(1, len1 + 1):
             for j in range(1, len2 + 1):
                 if text1[i-1] == text2[j-1]:
-                    dp[i][j] = dp[i-1][j-1] + 1
+                    curr[j] = prev[j-1] + 1
                 else:
-                    dp[i][j] = max(dp[i-1][j], dp[i][j-1])
+                    curr[j] = max(prev[j], curr[j-1])
+            prev, curr = curr, [0] * (len2 + 1)
         
-        lcs_len = dp[len1][len2]
-        return lcs_len / min(len1, len2) if min(len1, len2) > 0 else 0.0
+        lcs_len = prev[len2]
+        return lcs_len / min(len1, len2)
     
+    _STOPWORDS = {
+        '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个',
+        '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好',
+        '自己', '这', '他', '她', '它', '们', '那', '些', '什么', '如何', '怎么', '哪',
+        '为什么', '可以', '能够', '应该', '需要', '通过', '进行', '使用', '实现', '包括',
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+        'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
+        'used', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
+        'as', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
+        'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either',
+        'it', 'its', 'this', 'that', 'these', 'those', 'which', 'who', 'whom'
+    }
+
+    def _tokenize(self, text: str) -> set:
+        """中英文混合分词，返回去停用词后的词集"""
+        text_lower = text.lower()
+        if JIEBA_AVAILABLE:
+            words = set()
+            for w in jieba.cut(text_lower):
+                w = w.strip()
+                if len(w) >= 2 and w not in self._STOPWORDS:
+                    words.add(w)
+            return words
+        else:
+            words = set()
+            for w in re.findall(r'[\u4e00-\u9fff]{2,}|[a-zA-Z]{2,}', text_lower):
+                if w not in self._STOPWORDS:
+                    words.add(w)
+            return words
+
     def _word_overlap_similarity(self, text1: str, text2: str) -> float:
-        words1, words2 = set(text1.lower().split()), set(text2.lower().split())
+        words1, words2 = self._tokenize(text1), self._tokenize(text2)
         if not words1 or not words2:
             return 0.0
         intersection = words1 & words2
@@ -202,38 +250,12 @@ class PointwiseEvaluator:
     
     def _keyword_coverage(self, predicted: str, expected: str) -> float:
         """关键词覆盖率：标准答案中的关键词被预测回答覆盖的比例"""
-        import re
-        
-        def extract_keywords(text: str) -> set:
-            stopwords = {
-                '的', '了', '在', '是', '我', '有', '和', '就', '不', '人', '都', '一', '一个',
-                '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好',
-                '自己', '这', '他', '她', '它', '们', '那', '些', '什么', '如何', '怎么', '哪',
-                '为什么', '可以', '能够', '应该', '需要', '通过', '进行', '使用', '实现', '包括',
-                'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-                'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-                'should', 'may', 'might', 'shall', 'can', 'need', 'dare', 'ought',
-                'used', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from',
-                'as', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
-                'and', 'but', 'or', 'nor', 'not', 'so', 'yet', 'both', 'either',
-                'it', 'its', 'this', 'that', 'these', 'those', 'which', 'who', 'whom'
-            }
-            words = re.findall(r'[\u4e00-\u9fff]+|[a-zA-Z]{2,}', text.lower())
-            keywords = set()
-            for w in words:
-                if len(w) >= 2 and w not in stopwords:
-                    keywords.add(w)
-            return keywords
-        
-        expected_keywords = extract_keywords(expected)
+        expected_keywords = self._tokenize(expected)
         if not expected_keywords:
             return 1.0
         
-        predicted_lower = predicted.lower()
-        covered = 0
-        for kw in expected_keywords:
-            if kw in predicted_lower:
-                covered += 1
+        predicted_keywords = self._tokenize(predicted)
+        covered = len(expected_keywords & predicted_keywords)
         
         return covered / len(expected_keywords)
     
@@ -303,15 +325,15 @@ class PointwiseEvaluator:
         
         return f"""
 # 角色设定
-你是一名严格且公平的《软件工程》课程评审专家。你必须依据评分标准客观评分，不受回答长度、措辞风格等表面因素影响。
+你是一名严格且挑剔的评审专家。你必须严格按照评分标准客观评分，独立思考，不受任何外部因素影响。
 
 # 评分标准（1-5分）
-1. 准确性（Accuracy）：回答的事实是否正确，是否与《软件工程》课程知识体系一致
-   - 1分：多处事实错误或严重偏离课程内容
+1. 准确性（Accuracy）：回答的事实是否正确，是否与标准知识体系一致
+   - 1分：多处事实错误或严重偏离
    - 2分：有较明显的事实错误
    - 3分：基本正确，但有少量不准确或含糊之处
    - 4分：大部分正确，仅有微小瑕疵
-   - 5分：完全正确，精确符合课程知识体系
+   - 5分：完全正确，精确符合知识体系
 
 2. 完整性（Completeness）：回答是否覆盖了问题的所有关键要点
    - 1分：仅涉及少量要点，遗漏重要内容
@@ -341,10 +363,12 @@ class PointwiseEvaluator:
    - 4分：推理过程较为清晰
    - 5分：清晰说明推理过程，逻辑严谨
 
-# 禁止事项
+# 重要要求
+- 每个维度的评分必须有所区分，不能所有维度打相同分数
+- 评分应合理分布在整个1-5区间，不要集中在高分区域
 - 回答长度不应影响评分，重点评估内容质量而非数量
 - 不要因为回答较长就给高分，也不要因为回答较短就给低分
-- 评分要严格，不要轻易给满分5分
+- 独立思考，不要受参考答案的存在与否影响评分判断
 
 # 问题上下文
 {context if context else "（无上下文信息）"}
@@ -377,7 +401,8 @@ class PointwiseEvaluator:
             values = [s[dim] for s in samples]
             aggregated[dim] = round(sum(values) / len(values), 2)
         
-        aggregated["overall"] = round(sum(aggregated[dim] for dim in dimensions) / len(dimensions), 2)
+        overall_values = [s["overall"] for s in samples]
+        aggregated["overall"] = round(sum(overall_values) / len(overall_values), 2)
         aggregated["comment"] = f"基于 {len(samples)} 次评估的平均结果"
         aggregated["sample_std"] = {dim: round(np.std([s[dim] for s in samples]), 2) for dim in dimensions}
         
@@ -389,14 +414,16 @@ class PointwiseEvaluator:
         if result["llm_judge"]:
             llm_overall = result["llm_judge"]["overall"]
             llm_score = llm_overall / 5.0
+            credibility = result.get("info_credibility", 0.5)
             if has_expected_answer:
                 auto_score = result["automatic"]["score"]
-                final_score = round((auto_score * 0.4 + llm_score * 0.6), 4)
-                logger.info(f"[评估] 计算综合评分(有参考答案): auto={auto_score:.4f}, llm={llm_score:.4f}, final={final_score:.4f}")
+                final_score = round(auto_score * 0.4 + llm_score * 0.4 + credibility * 0.2, 4)
+                logger.info(f"[评估] 计算综合评分(有参考答案): auto={auto_score:.4f}, llm={llm_score:.4f}, credibility={credibility:.4f}, final={final_score:.4f}")
                 return final_score
             else:
-                logger.warning(f"[评估] ⚠️ 无参考答案，自动评估使用默认值0，总分=LLM评分={llm_score:.4f}（建议提供期望答案以启用完整评估）")
-                return round(llm_score, 4)
+                final_score = round(llm_score * 0.6 + credibility * 0.4, 4)
+                logger.warning(f"[评估] ⚠️ 无参考答案，总分=0.6×L+0.4×C={llm_score:.4f}×0.6+{credibility:.4f}×0.4={final_score:.4f}")
+                return final_score
         else:
             if has_expected_answer:
                 logger.info(f"[评估] 计算综合评分(仅自动评估): auto={result['automatic']['score']:.4f}")
@@ -742,13 +769,16 @@ class EvaluationPipeline:
             context = item.get("context", "")
             
             graphrag_eval = self.pointwise_evaluator.evaluate(
-                all_answers["graphrag"][idx], expected, context, num_samples=num_samples
+                all_answers["graphrag"][idx], expected, context, num_samples=num_samples,
+                source_type="graphrag", used_context=bool(context)
             )
             rag_eval = self.pointwise_evaluator.evaluate(
-                all_answers["rag"][idx], expected, context, num_samples=num_samples
+                all_answers["rag"][idx], expected, context, num_samples=num_samples,
+                source_type="rag", used_context=bool(context)
             )
             llm_eval = self.pointwise_evaluator.evaluate(
-                all_answers["llm"][idx], expected, context, num_samples=num_samples
+                all_answers["llm"][idx], expected, context, num_samples=num_samples,
+                source_type="llm", used_context=False
             )
             
             results["pointwise_results"]["graphrag"].append({

@@ -4,7 +4,7 @@ import hashlib
 import aiofiles
 from pathlib import Path
 from typing import Optional
-from infra.config import settings
+from config import settings
 
 
 class Storage:

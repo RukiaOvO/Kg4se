@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Literal
-from infra.config import settings
+from config import settings
 from infra.ai_providers import AIProviderFactory
 from services.config_service import config_service
 

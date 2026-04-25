@@ -89,7 +89,6 @@ class Settings(BaseSettings):
     graphrag_keyword_weight: float = 0.2
     graphrag_graph_weight: float = 0.1
     graphrag_default_top_k: int = 3
-    vector_search_threshold: float = 0.75
     
     # ============================================
     # API 配置

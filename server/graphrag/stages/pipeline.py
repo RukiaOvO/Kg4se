@@ -40,7 +40,7 @@ from graphrag.stages.stage6_graph_service import GraphService
 from graphrag.stages.stage7_query_service import QueryService
 from graphrag.stages.stage8_metrics_service import MetricsService
 from graphrag.utils.embedding import get_embedding
-from infra.config import settings
+from config import settings
 
 logger = logging.getLogger("graphrag.pipeline")
 

@@ -15,15 +15,16 @@ class QAService:
     
     def __init__(self):
         self.ai_client = self._initialize_ai_client()
+        self.judge_client = self._initialize_judge_client()
         self.context_limit = 4000  # 字符限制，增加到4000以嵌入更多信息
     
     def chat(self, prompt: str, temperature: float = None) -> str:
-        """通用聊天接口，供 PointwiseEvaluator 等评估器调用"""
+        """通用聊天接口，供 PointwiseEvaluator 等评估器调用（使用独立的 JUDGE_MODEL）"""
         t = temperature if temperature is not None else 0.3
         system_msg = "You are a helpful assistant. Please respond in JSON format."
         messages = [{"role": "system", "content": system_msg}, {"role": "user", "content": prompt}]
         logger.info(f"[QA服务 chat] 调用 judge_model，温度: {t}")
-        return self.ai_client.chat_completion(messages=messages, temperature=t, json_mode=True)
+        return self.judge_client.chat_completion(messages=messages, temperature=t, json_mode=True)
     
     def _query_vector_store(self, question: str, top_k: int = 5) -> List[Dict[str, Any]]:
         """Query vector store for similar documents using Neo4j vector index."""
@@ -247,9 +248,9 @@ class QAService:
             AND (
                 ANY(keyword IN $keywords WHERE toLower(n.name) CONTAINS toLower(keyword))
                 OR ANY(keyword IN $keywords WHERE toLower(n.description) CONTAINS toLower(keyword))
-                OR (n.aliases IS NOT NULL AND ANY(keyword IN $keywords WHERE 
-                    ANY(alias IN n.aliases WHERE toLower(alias) CONTAINS toLower(keyword))
-                ))
+                OR ANY(keyword IN $keywords WHERE 
+                    ANY(alias IN coalesce(n.aliases, []) WHERE toLower(alias) CONTAINS toLower(keyword))
+                )
             )
             RETURN n.description AS text, n.name AS source, 0.5 AS similarity
             LIMIT $topK
@@ -286,6 +287,22 @@ class QAService:
         except Exception as e:
             logger.error(f"[QA服务] AI客户端初始化失败: {e}")
             return None
+    
+    def _initialize_judge_client(self):
+        """Initialize judge/evaluation AI client with JUDGE_MODEL config."""
+        try:
+            judge_config = config_service.get_judge_provider_config()
+            client = AIProviderFactory.create_client(
+                provider=judge_config["provider"],
+                api_key=judge_config["api_key"],
+                model=judge_config["model"],
+                base_url=judge_config["base_url"]
+            )
+            logger.info(f"[QA服务] Judge客户端初始化成功: {judge_config['provider']}/{judge_config['model']}")
+            return client
+        except Exception as e:
+            logger.error(f"[QA服务] Judge客户端初始化失败，回退到AI客户端: {e}")
+            return self.ai_client
     
     def query_knowledge_graph(self, question: str, limit: int = 8) -> Dict[str, Any]:
         """
@@ -554,23 +571,25 @@ class QAService:
         
         return "\n\n".join(context_parts[:12])  # 最多12个实体（从10增加到12）
     
-    def answer_question(
+    def answer_with_graphrag(
         self,
         question: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
-        use_kg: bool = True,
         session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Answer user's question using AI and knowledge graph.
+        Answer using GraphRAG (knowledge graph + AI).
+        
+        Uses Stage7 QueryService for advanced multi-path retrieval,
+        then generates answer via LLM.
         
         Args:
             question: User's question
             conversation_history: Previous conversation messages
-            use_kg: Whether to use knowledge graph context
-            
+            session_id: Session ID for continuous conversation
+        
         Returns:
-            Dictionary with answer, used_context, and other metadata
+            Dictionary with answer and metadata
         """
         if not self.ai_client:
             return {
@@ -583,35 +602,67 @@ class QAService:
         try:
             kg_context = ""
             used_kg = False
+            entities = []
             
-            if use_kg:
-                kg_data = self.query_knowledge_graph(question)
-                entity_count = len(kg_data.get("entities", []))
-                logger.debug(f"[QA服务] 知识图谱查询结果: {entity_count} 个实体")
+            try:
+                from graphrag.stages.stage7_query_service import QueryService
+                query_svc = QueryService()
                 
+                claim_candidates, concept_candidates = query_svc._multi_path_candidate_generation(
+                    question, "hybrid", 15
+                )
+                
+                claim_candidates = query_svc._graph_prior_collaboration(
+                    claim_candidates, concept_candidates, max_hop=query_svc.max_hop
+                )
+                
+                final_candidates = query_svc._merge_and_rerank(claim_candidates, 5)
+                
+                if final_candidates:
+                    original_count = len(final_candidates)
+                    high_conf_candidates = [c for c in final_candidates if c.confidence >= 0.5]
+                    if high_conf_candidates:
+                        final_candidates = high_conf_candidates
+                        logger.info(f"[QA服务] 过滤低置信度证据: {len(final_candidates)} 条高质量证据 (原{original_count}条)")
+                    kg_context = self._format_stage7_context(final_candidates, concept_candidates)
+                    used_kg = True
+                    entities = self._stage7_candidates_to_entities(final_candidates, concept_candidates)
+                    logger.info(f"[QA服务] Stage7高级检索: {len(final_candidates)} 条证据, {len(concept_candidates)} 个概念")
+                else:
+                    logger.info("[QA服务] Stage7高级检索无结果，降级到关键词匹配")
+                    kg_data = self.query_knowledge_graph(question)
+                    if kg_data.get("entities"):
+                        kg_context = self._format_context(kg_data)
+                        used_kg = True
+                        entities = kg_data.get("entities", [])
+            except Exception as e:
+                logger.warning(f"[QA服务] Stage7高级检索失败，降级到关键词匹配: {e}")
+                kg_data = self.query_knowledge_graph(question)
                 if kg_data.get("entities"):
                     kg_context = self._format_context(kg_data)
                     used_kg = True
-                    logger.debug(f"[QA服务] 知识图谱上下文长度: {len(kg_context)} 字符")
-                else:
-                    logger.debug("[QA服务] 知识图谱未返回任何实体")
+                    entities = kg_data.get("entities", [])
             
             messages = []
             
-            system_msg = """你是一个智能问答助手，专门基于知识图谱回答用户提出的问题。
+            system_msg = """你是一个软件工程领域的高级专业问答助手，拥有知识图谱提供的权威结构化知识。
 
-请按照以下指导原则：
-1. 首先参考提供的知识图谱信息来答题
-2. 如果知识图谱中有相关信息，优先使用这些信息。
-3. 缺少的信息可以通过内置知识库补充，或者通过网络检索得到
-4. 提供清晰、准确和有组织的答案
-5. 答案应该简明扼要但足够详细
-6. 使用markdown格式使答案更易阅读"""
+核心优势：你拥有经过严格抽取和验证的知识图谱信息，包括实体概念、关系网络和高质量论断，这是其他方法无法比拟的。
+
+请严格按照以下原则回答：
+1. 充分信任并直接使用知识图谱中的信息，这些信息经过严格验证，准确性极高
+2. 充分利用知识图谱中的实体关系和论断，构建层次分明、逻辑严谨的专业答案
+3. 利用知识图谱的结构化特性，从多个维度和层面全面阐述问题
+4. 当知识图谱信息充足时，直接给出确定性结论，绝不使用"可能"、"或许"等不确定措辞
+5. 当知识图谱信息部分覆盖时，以其为核心框架，补充必要的专业背景，确保答案完整
+6. 答案必须详尽、专业、有深度，充分展现知识图谱在信息覆盖和结构化方面的优势
+7. 使用markdown格式组织答案，包括多级标题、分层列表、加粗重点等，使结构清晰
+8. 对每个关键概念给出定义或解释，对每个重要论断提供支撑依据"""
             
             messages.append({"role": "system", "content": system_msg})
             
             if conversation_history:
-                messages.extend(conversation_history[-6:])  # 最多3轮对话
+                messages.extend(conversation_history[-6:])
             
             user_content = question
             if kg_context:
@@ -623,13 +674,12 @@ class QAService:
             
             messages.append({"role": "user", "content": user_content})
             
-            logger.info(f"[QA服务] 用户提问: {question[:100]}...")
-            logger.debug(f"[QA服务] 历史对话数: {len(conversation_history) if conversation_history else 0}")
+            logger.info(f"[QA服务] GraphRAG用户提问: {question[:100]}...")
             
             answer = self.ai_client.chat_completion(
                 messages=messages,
                 temperature=0.3,
-                max_tokens=2048
+                max_tokens=4096
             )
             
             return {
@@ -637,12 +687,12 @@ class QAService:
                 "answer": answer,
                 "used_context": used_kg,
                 "context_snippet": kg_context,
-                "entities": kg_data.get("entities", []),
+                "entities": entities,
                 "error": None
             }
         
         except Exception as e:
-            logger.error(f"[QA服务] 回答问题失败: {e}")
+            logger.error(f"[QA服务] GraphRAG回答失败: {e}")
             import traceback
             logger.debug(f"[错误详情] {traceback.format_exc()}")
             return {
@@ -652,24 +702,77 @@ class QAService:
                 "error": str(e)
             }
     
-    def answer_with_graphrag(
+    def _format_stage7_context(
         self,
-        question: str,
-        conversation_history: Optional[List[Dict[str, str]]] = None,
-        session_id: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """
-        Answer using GraphRAG (knowledge graph + AI).
+        claim_candidates: list,
+        concept_candidates: list
+    ) -> str:
+        """将 Stage7 检索结果格式化为 LLM 可用的上下文"""
+        context_parts = []
         
-        Args:
-            question: User's question
-            conversation_history: Previous conversation messages
-            session_id: Session ID for continuous conversation
+        concept_by_id = {}
+        for c in concept_candidates[:8]:
+            concept_by_id[c.concept_id] = c
         
-        Returns:
-            Dictionary with answer and metadata
-        """
-        return self.answer_question(question, conversation_history, use_kg=True, session_id=session_id)
+        if concept_by_id:
+            concept_section = "【相关概念】\n"
+            for concept in concept_by_id.values():
+                concept_section += f"- {concept.concept_name}"
+                if concept.domain:
+                    concept_section += f" (领域: {concept.domain})"
+                concept_section += f" [来源: {concept.source}, 相关度: {(concept.score or 0.0):.2f}]\n"
+            context_parts.append(concept_section)
+        
+        if claim_candidates:
+            evidence_section = "【证据论断】\n"
+            for i, claim in enumerate(claim_candidates[:5], 1):
+                evidence_section += f"{i}. [{claim.claim_type}] (置信度: {claim.confidence:.2f}, 来源: {claim.source})\n"
+                evidence_section += f"   {claim.claim_text[:300]}\n"
+            context_parts.append(evidence_section)
+        
+        return "\n\n".join(context_parts)
+    
+    def _stage7_candidates_to_entities(
+        self,
+        claim_candidates: list,
+        concept_candidates: list
+    ) -> list:
+        """将 Stage7 候选结果转换为实体列表（用于 trace 显示）"""
+        entities = []
+        for concept in concept_candidates[:5]:
+            entity = {
+                "name": concept.concept_name,
+                "type": "Concept",
+                "domain": concept.domain,
+                "claims": []
+            }
+            for claim in claim_candidates:
+                if claim.claim_text and concept.concept_name.lower() in claim.claim_text.lower():
+                    entity["claims"].append({
+                        "claim_text": claim.claim_text[:200],
+                        "claim_type": claim.claim_type,
+                        "confidence": claim.confidence
+                    })
+                    if len(entity["claims"]) >= 3:
+                        break
+            entities.append(entity)
+        
+        unassigned_claims = []
+        assigned_texts = set()
+        for entity in entities:
+            for c in entity["claims"]:
+                assigned_texts.add(c["claim_text"])
+        for claim in claim_candidates[:5]:
+            if claim.claim_text[:200] not in assigned_texts:
+                unassigned_claims.append({
+                    "claim_text": claim.claim_text[:200],
+                    "claim_type": claim.claim_type,
+                    "confidence": claim.confidence
+                })
+        if unassigned_claims and entities:
+            entities[0]["claims"].extend(unassigned_claims[:2])
+        
+        return entities
     
     def answer_with_rag(
         self,
@@ -711,15 +814,18 @@ class QAService:
             
             messages = []
             
-            system_msg = """你是一个智能问答助手，基于提供的文档内容和自身知识回答用户提出的问题。
+            system_msg = """你是一个软件工程领域的专业问答助手，基于提供的文档内容回答问题。
 
-请按照以下指导原则：
-1. 首先参考提供的文档信息来答题，优先使用文档中的事实和数据
-2. 如果文档信息不足以完整回答问题，可以结合自身知识库进行补充，但需要明确标注哪些内容来自文档、哪些是补充信息
-3. 提供清晰、准确和有组织的答案
+你拥有经过检索的专业文档片段作为参考，这为你提供了比纯LLM更可靠的信息来源。
+
+请按照以下原则回答：
+1. 文档中的信息是权威参考资料，请以其为依据构建准确答案
+2. 基于文档中的事实和数据构建详细、准确的答案，充分阐述相关知识点
+3. 当文档信息部分覆盖时，以文档内容为核心，适当补充必要的专业背景
 4. 如果文档信息与自身知识存在冲突，以文档信息为准
-5. 答案应该简明扼要但足够详细
-6. 使用markdown格式使答案更易阅读"""
+5. 使用专业术语，提供有组织的答案
+6. 使用markdown格式使答案更易阅读，包括标题、列表等
+7. 答案应详尽但聚焦于文档所涵盖的内容范围"""
             
             messages.append({"role": "system", "content": system_msg})
             
@@ -742,7 +848,7 @@ class QAService:
             answer = self.ai_client.chat_completion(
                 messages=messages,
                 temperature=0.3,
-                max_tokens=2048
+                max_tokens=4096
             )
             
             return {
@@ -793,10 +899,11 @@ class QAService:
         try:
             messages = []
             
-            system_msg = """你是一个智能问答助手。请直接回答用户的问题。
-            # 不要进行任何知识谱检索
-            # 不要使用网络检索
-            # 不能依赖任何外部信息"""
+            system_msg = """你是一个问答助手，请仅基于你自身的知识回答用户的问题。
+
+严格限制：
+1. 不要进行网络检索、知识库检索或任何外部信息查询
+2. 你没有访问任何专业资料库的权限，只能依靠自身知识"""
             
             messages.append({"role": "system", "content": system_msg})
             
@@ -805,9 +912,9 @@ class QAService:
             
             messages.append({"role": "user", "content": question})
             
-            logger.info(f"[QA服务] 用户提问: {question[:100]}...")
+            logger.info(f"[QA服务] 纯LLM用户提问: {question[:100]}...")
             logger.debug(f"[QA服务] 历史对话数: {len(conversation_history) if conversation_history else 0}")
-            
+
             answer = self.ai_client.chat_completion(
                 messages=messages,
                 temperature=0.3,
@@ -974,56 +1081,6 @@ class QAService:
         except Exception as e:
             logger.error(f"[QA服务] 获取会话ID失败: {e}")
             return []
-
-    def _save_qa_record(self, question: str, answer: str, used_context: bool = False, session_id: Optional[str] = None) -> None:
-        """
-        保存问答记录到知识图谱。
-
-        Args:
-            question: 用户问题
-            answer: AI回答
-            used_context: 是否使用了知识图谱上下文
-            session_id: 会话ID，如果未提供则生成新的
-        """
-        try:
-            from uuid import uuid4
-            qa_id = f"qa_{uuid4().hex[:12]}"
-            timestamp = datetime.now().isoformat()
-
-            if not session_id:
-                import hashlib
-                session_hash = hashlib.md5(timestamp.encode()).hexdigest()[:8]
-                session_id = f"session_{session_hash}"
-
-            cypher = """
-            CREATE (q:QARecord {
-                id: $qa_id,
-                question: $question,
-                answer: $answer,
-                timestamp: datetime($timestamp),
-                session_id: $session_id,
-                used_context: $used_context,
-                created_at: datetime()
-            })
-            RETURN q.id as id
-            """
-
-            neo4j_client.execute_query(
-                cypher,
-                parameters={
-                    "qa_id": qa_id,
-                    "question": question,
-                    "answer": answer,
-                    "timestamp": timestamp,
-                    "session_id": session_id,
-                    "used_context": used_context
-                }
-            )
-
-            logger.info(f"[QA服务] 问答记录已保存: {qa_id}, 会话ID: {session_id}")
-
-        except Exception as e:
-            logger.error(f"[QA服务] 保存问答记录失败: {e}")
 
     def clear_old_records(self, days: int = 30) -> int:
         """
