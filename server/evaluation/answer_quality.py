@@ -107,25 +107,46 @@ class PointwiseEvaluator:
         """当没有参考答案时返回默认自动评分"""
         return {
             "semantic_similarity": 0.0,
+            "length_adequacy": 0.0,
             "word_overlap": 0.0,
-            "keyword_coverage": 0.0,
+            "keyword_f1": 0.0,
             "rouge_l": 0.0,
             "score": 0.0
         }
     
     def _automatic_evaluation(self, predicted: str, expected: str) -> Dict[str, float]:
-        """自动化指标评估"""
-        length_score = self._length_score(predicted, expected)
+        """自动化指标评估
+        
+        五维度指标（均归一化至[0,1]）:
+        - semantic_similarity (Sem): 语义相似度，基于嵌入或LCS
+        - length_adequacy (Len): 长度充分度，有界比率
+        - word_overlap (WOR): 词重叠率，Jaccard系数
+        - keyword_f1 (KF1): 关键词F1，兼顾精确率和召回率
+        - rouge_l (RL): ROUGE-L F-measure，语序匹配
+        
+        权重设计依据:
+        - Sem=0.30: 语义匹配是最直接的质量指标
+        - KF1=0.25: 事实覆盖需同时考虑精确率和召回率
+        - RL=0.20: 语序匹配补充语义和词汇评估
+        - Len=0.15: 充分度仅作基础校验
+        - WOR=0.10: 与RL和KF1部分冗余，权重最低
+        """
+        sem = self._semantic_similarity(predicted, expected)
+        length = self._length_score(predicted, expected)
         word_overlap = self._word_overlap_similarity(predicted, expected)
-        keyword_cov = self._keyword_coverage(predicted, expected)
+        keyword_f1 = self._keyword_f1(predicted, expected)
         rouge_l = self._rouge_l_score(predicted, expected)
         
         return {
-            "semantic_similarity": round(length_score, 4),
+            "semantic_similarity": round(sem, 4),
+            "length_adequacy": round(length, 4),
             "word_overlap": round(word_overlap, 4),
-            "keyword_coverage": round(keyword_cov, 4),
+            "keyword_f1": round(keyword_f1, 4),
             "rouge_l": round(rouge_l, 4),
-            "score": round((length_score * 0.30 + word_overlap * 0.15 + keyword_cov * 0.30 + rouge_l * 0.25), 4)
+            "score": round(
+                sem * 0.30 + length * 0.15 + word_overlap * 0.10 + keyword_f1 * 0.25 + rouge_l * 0.20,
+                4
+            )
         }
     
     def _rouge_l_score(self, text1: str, text2: str) -> float:
@@ -140,15 +161,21 @@ class PointwiseEvaluator:
             return self._simple_similarity(text1, text2)
     
     def _length_score(self, predicted: str, expected: str) -> float:
-        """基于回答长度的评分，越长分数越高，使用对数函数体现边际效益递减"""
+        """长度充分度：预测回答长度相对参考答案的充分程度
+        
+        公式: min(1.0, len_pred / len_ref)
+        - 预测比参考短 → 比值 < 1（信息可能不充分）
+        - 预测与参考相当 → 比值 ≈ 1（充分）
+        - 预测比参考长 → 比值封顶1.0（不奖励冗余）
+        值域: [0, 1]
+        """
         if not predicted:
             return 0.0
-        
         pred_len = len(predicted)
-        expected_len = max(len(expected) if expected else 0, 300)
-        
-        score = math.log10(1 + pred_len) / math.log10(1 + expected_len * 3)
-        return min(1.0, max(0.0, score))
+        ref_len = len(expected) if expected else 0
+        if ref_len <= 0:
+            return 1.0 if pred_len > 0 else 0.0
+        return min(1.0, pred_len / ref_len)
     
     def _information_credibility(self, predicted: str, context: str, used_context: bool, source_type: str) -> float:
         """信息可信度评估：基于回答是否有外部知识支撑及对上下文的引用程度
@@ -248,16 +275,31 @@ class PointwiseEvaluator:
         union = words1 | words2
         return len(intersection) / len(union) if union else 0.0
     
-    def _keyword_coverage(self, predicted: str, expected: str) -> float:
-        """关键词覆盖率：标准答案中的关键词被预测回答覆盖的比例"""
-        expected_keywords = self._tokenize(expected)
-        if not expected_keywords:
+    def _keyword_f1(self, predicted: str, expected: str) -> float:
+        """关键词F1分数：同时考虑精确率和召回率
+        
+        Precision = |K_pred ∩ K_ref| / |K_pred|  (预测关键词中有多少是相关的)
+        Recall    = |K_pred ∩ K_ref| / |K_ref|   (参考关键词中有多少被覆盖)
+        F1        = 2 × P × R / (P + R)
+        
+        相比纯召回率，F1防止通过堆砌关键词刷分
+        值域: [0, 1]
+        """
+        pred_keywords = self._tokenize(predicted)
+        ref_keywords = self._tokenize(expected)
+        
+        if not pred_keywords and not ref_keywords:
             return 1.0
+        if not pred_keywords or not ref_keywords:
+            return 0.0
         
-        predicted_keywords = self._tokenize(predicted)
-        covered = len(expected_keywords & predicted_keywords)
+        overlap = len(pred_keywords & ref_keywords)
+        precision = overlap / len(pred_keywords)
+        recall = overlap / len(ref_keywords)
         
-        return covered / len(expected_keywords)
+        if precision + recall == 0:
+            return 0.0
+        return 2 * precision * recall / (precision + recall)
     
     def _get_default_evaluation(self) -> Dict[str, Any]:
         """返回默认评估结果"""

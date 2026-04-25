@@ -444,8 +444,9 @@ export interface LLMJudgeResult {
 
 export interface AutomaticEvaluation {
   semantic_similarity: number
+  length_adequacy: number
   word_overlap: number
-  keyword_coverage: number
+  keyword_f1: number
   rouge_l: number
   score: number
 }

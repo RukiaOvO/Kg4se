@@ -116,12 +116,17 @@
                     <n-tabs type="line" animated size="small" class="eval-tabs">
                       <n-tab-pane name="auto" tab="自动评估标准">
                         <div class="tab-content">
-                          <div class="tab-subtitle">基于长度和文本匹配的自动化指标</div>
+                          <div class="tab-subtitle">五维度自动化指标（均归一化至[0,1]）</div>
                           <div class="formula-list">
                             <div class="formula-list-item">
-                              <span class="fl-label">长度评分</span>
-                              <div class="fl-value"><code>log<sub>10</sub>(1+L) / log<sub>10</sub>(1+3R)</code></div>
-                              <span class="fl-desc">对数长度（边际递减）</span>
+                              <span class="fl-label">语义相似度</span>
+                              <div class="fl-value"><code>cos(emb<sub>pred</sub>, emb<sub>ref</sub>)</code></div>
+                              <span class="fl-desc">语义匹配</span>
+                            </div>
+                            <div class="formula-list-item">
+                              <span class="fl-label">长度充分度</span>
+                              <div class="fl-value"><code>min(1, |pred|/|ref|)</code></div>
+                              <span class="fl-desc">有界比率</span>
                             </div>
                             <div class="formula-list-item">
                               <span class="fl-label">词重叠率</span>
@@ -129,9 +134,9 @@
                               <span class="fl-desc">Jaccard系数</span>
                             </div>
                             <div class="formula-list-item">
-                              <span class="fl-label">关键词覆盖率</span>
-                              <div class="fl-value"><code>|K<sub>pred</sub> &cap; K<sub>exp</sub>| / |K<sub>exp</sub>|</code></div>
-                              <span class="fl-desc">信息完整性</span>
+                              <span class="fl-label">关键词F1</span>
+                              <div class="fl-value"><code>2PR / (P + R)</code></div>
+                              <span class="fl-desc">精确率+召回率</span>
                             </div>
                             <div class="formula-list-item">
                               <span class="fl-label">ROUGE-L</span>
@@ -141,7 +146,15 @@
                           </div>
                           <div class="formula-total">
                             <span class="ft-label">自动评估总分 A</span>
-                            <div class="ft-value"><code>A = 0.3&times;Len + 0.15&times;WOR + 0.3&times;KC + 0.25&times;RL</code></div>
+                            <div class="ft-value"><code>A = 0.30&times;Sem + 0.15&times;Len + 0.10&times;WOR + 0.25&times;KF1 + 0.20&times;RL</code></div>
+                          </div>
+                          <div class="weight-rationale">
+                            <span class="wr-label">权重设计依据</span>
+                            <div class="wr-item">Sem(0.30): 语义匹配是最直接的质量指标</div>
+                            <div class="wr-item">KF1(0.25): 事实覆盖需兼顾精确率和召回率</div>
+                            <div class="wr-item">RL(0.20): 语序匹配补充语义和词汇评估</div>
+                            <div class="wr-item">Len(0.15): 充分度仅作基础校验</div>
+                            <div class="wr-item">WOR(0.10): 与RL和KF1部分冗余，权重最低</div>
                           </div>
                           <div class="tab-score-section">
                             <div class="tss-header">各方法分数 A</div>
@@ -960,6 +973,31 @@ const scoreScaleList = [
     }
   }
 
+  .weight-rationale {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 14px;
+    margin-top: 10px;
+    background: linear-gradient(135deg, #fffbe6, #fff9e6);
+    border-radius: 8px;
+    border-left: 3px solid #d4af37;
+
+    .wr-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      margin-bottom: 2px;
+    }
+
+    .wr-item {
+      font-size: 11px;
+      color: #777;
+      line-height: 1.5;
+      padding-left: 4px;
+    }
+  }
+
   .credibility-concept {
     display: flex;
     flex-direction: column;
@@ -1150,35 +1188,42 @@ const scoreScaleList = [
 
     .ss-body {
       display: flex;
-      flex-direction: column;
-      gap: 4px;
+      flex-direction: row;
+      gap: 8px;
+      justify-content: space-between;
 
       .ss-row {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 8px;
-        padding: 4px 8px;
-        border-radius: 4px;
+        gap: 2px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: #fafafa;
+        flex: 1;
+        min-width: 50px;
 
-        &:hover { background: #fafafa; }
+        &:hover { background: white; }
 
         .ss-score {
-          font-size: 15px;
+          font-size: 16px;
           font-weight: 800;
-          width: 22px;
+          width: auto;
           text-align: center;
         }
 
         .ss-level {
-          font-size: 12px;
+          font-size: 11px;
           font-weight: 600;
           color: #333;
-          width: 40px;
+          width: auto;
         }
 
         .ss-desc {
-          font-size: 11px;
+          font-size: 10px;
           color: #888;
+          text-align: center;
+          white-space: nowrap;
         }
       }
     }

@@ -74,9 +74,39 @@ class TestPointwiseEvaluator:
         )
         
         assert "semantic_similarity" in result
+        assert "length_adequacy" in result
+        assert "word_overlap" in result
+        assert "keyword_f1" in result
         assert "rouge_l" in result
         assert "score" in result
         assert 0 <= result["score"] <= 1
+
+    def test_length_adequacy_bounded(self):
+        """测试长度充分度值域在[0,1]"""
+        evaluator = PointwiseEvaluator()
+        score_short = evaluator._length_score("短", "这是一段很长的参考答案内容")
+        score_equal = evaluator._length_score("这是一段等长的参考答案内容", "这是一段等长的参考答案内容")
+        score_long = evaluator._length_score("这是一段非常非常长的预测回答内容超过了参考答案", "短参考")
+        
+        assert 0 <= score_short <= 1.0
+        assert score_equal == 1.0
+        assert score_long == 1.0
+        assert score_short < score_equal
+
+    def test_keyword_f1_symmetry(self):
+        """测试关键词F1的对称性：F1(A,B) == F1(B,A)"""
+        evaluator = PointwiseEvaluator()
+        f1_ab = evaluator._keyword_f1("软件工程方法论", "软件工程项目管理")
+        f1_ba = evaluator._keyword_f1("软件工程项目管理", "软件工程方法论")
+        assert abs(f1_ab - f1_ba) < 0.001
+
+    def test_keyword_f1_penalizes_stuffing(self):
+        """测试关键词F1惩罚关键词堆砌：纯召回率不惩罚，但F1会"""
+        evaluator = PointwiseEvaluator()
+        pred = "软件 工程 质量 成本 效率 维护 需求 可靠性 测试 设计 架构 数据库 算法 网络"
+        ref = "软件工程的目标是提高软件质量和可靠性"
+        f1 = evaluator._keyword_f1(pred, ref)
+        assert f1 < 1.0
     
     def test_information_credibility_no_context(self):
         """测试无外部知识上下文时信息可信度为低分"""
