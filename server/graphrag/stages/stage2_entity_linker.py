@@ -328,7 +328,7 @@ class EntityLinker:
                 # 应用领域过滤（仅保留软件工程相关实体）
                 is_valid, domain_conf = self.domain_filter.is_software_engineering_entity(
                     result.concept_name,
-                    entity_type="KnowledgePoint"
+                    entity_type="Concept"
                 )
                 
                 if is_valid:

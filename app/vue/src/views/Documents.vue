@@ -234,7 +234,7 @@
 
         <!-- Statistics -->
         <n-divider>{{ t('documents.statistics') }}</n-divider>
-        <n-grid :cols="4" :x-gap="16" :y-gap="12">
+        <n-grid :cols="5" :x-gap="16" :y-gap="12">
           <n-gi>
             <div class="stat-box">
               <div class="stat-value">{{ documentDetail.statistics.chunk_count }}</div>
@@ -259,10 +259,16 @@
               <div class="stat-label">{{ t('documents.relation_count') }}</div>
             </div>
           </n-gi>
+          <n-gi>
+            <div class="stat-box">
+              <div class="stat-value">{{ documentDetail.statistics.theme_count || 0 }}</div>
+              <div class="stat-label">{{ t('documents.theme_count') }}</div>
+            </div>
+          </n-gi>
         </n-grid>
 
-        <!-- Themes -->
-        <n-divider v-if="documentDetail.themes.length > 0">{{ t('documents.related_themes') }}</n-divider>
+        <!-- Theme Statistics -->
+        <n-divider>{{ t('documents.theme_statistics') }}</n-divider>
         <div v-if="documentDetail.themes.length > 0">
           <n-space vertical :size="12">
             <div v-for="theme in documentDetail.themes" :key="theme.id" class="theme-item">
@@ -577,23 +583,30 @@ const columns = computed(() => [
   {
     title: t('documents.chunks'),
     key: 'chunk_count',
-    width: 80,
+    width: 70,
     align: 'center' as const,
     render: (row: any) => h('span', { style: 'font-weight: bold; color: #3b82f6;' }, row.chunk_count)
   },
   {
     title: t('documents.concepts'),
     key: 'concept_count',
-    width: 80,
+    width: 70,
     align: 'center' as const,
     render: (row: any) => h('span', { style: 'font-weight: bold; color: #10b981;' }, row.concept_count)
   },
   {
     title: t('documents.claims'),
     key: 'claim_count',
-    width: 80,
+    width: 70,
     align: 'center' as const,
     render: (row: any) => h('span', { style: 'font-weight: bold; color: #f59e0b;' }, row.claim_count)
+  },
+  {
+    title: t('documents.themes'),
+    key: 'theme_count',
+    width: 70,
+    align: 'center' as const,
+    render: (row: any) => h('span', { style: 'font-weight: bold; color: #8b5cf6;' }, row.theme_count || 0)
   },
   {
     title: t('documents.status'),

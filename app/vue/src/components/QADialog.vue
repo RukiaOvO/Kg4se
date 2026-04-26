@@ -39,8 +39,8 @@
                 {{ msg.content }}
               </div>
               <div v-else class="assistant-content">
-                <!-- Markdown support for assistant messages -->
-                <div class="answer-text" v-html="formatAnswer(msg.content)"></div>
+                <!-- Markdown render for assistant messages -->
+                <Markdown :source="msg.content" class="markdown-content" />
                 
                 <!-- Show context if available -->
                 <div v-if="msg.context" class="context-info">
@@ -61,7 +61,7 @@
             </div>
             <div class="message-content">
               <n-spin size="small" />
-              <span style="margin-left: 8px;">思考中...</span>
+              <span style="margin-left: 8px;">{{ streamingStatus || '思考中...' }}</span>
             </div>
           </div>
         </div>
@@ -138,7 +138,8 @@ import {
   ChatbubbleOutline,
   PersonCircleOutline
 } from '@vicons/ionicons5'
-import { askQuestion, Message, checkQAHealth, QAMode } from '@/api/services'
+import { checkQAHealth, QAMode, Message } from '@/api/services'
+import { askQuestionStream } from '@/api/services'
 
 interface ConversationMessage extends Message {
   context?: string
@@ -170,6 +171,8 @@ const inputQuestion = ref('')
 const loading = ref(false)
 const qaMode = ref<QAMode>('graphrag')
 const providerName = ref('AI')
+const streamingStatus = ref('')
+const abortController = ref<AbortController | null>(null)
 
 // Initialize
 watch(
@@ -213,14 +216,13 @@ async function handleAsk() {
 
   try {
     loading.value = true
+    streamingStatus.value = '准备中...'
 
-    // Add user message
     messages.value.push({
       role: 'user',
       content: question
     })
 
-    // Prepare conversation history
     const conversationHistory: Message[] = messages.value
       .filter((m) => m.role !== undefined)
       .map((m) => ({
@@ -228,47 +230,78 @@ async function handleAsk() {
         content: m.content
       }))
 
-    // Get answer
-    const response = await askQuestion({
-      question,
-      conversation_history: conversationHistory.slice(0, -1), // Exclude current user message
-      mode: qaMode.value
+    const assistantIndex = messages.value.length
+    messages.value.push({
+      role: 'assistant',
+      content: ''
     })
 
-    if (response.success) {
-      messages.value.push({
-        role: 'assistant',
-        content: response.answer,
-        context: response.context_snippet
-      })
-    } else {
-      message.error(response.error || '获取答案失败')
-      messages.value.pop() // Remove user message if failed
-    }
+    abortController.value = askQuestionStream(
+      {
+        question,
+        conversation_history: conversationHistory.slice(0, -1),
+        mode: qaMode.value
+      },
+      (token) => {
+        const msg = messages.value[assistantIndex]
+        if (msg) msg.content += token
+      },
+      (status) => {
+        streamingStatus.value = status
+      },
+      (result) => {
+        const msg = messages.value[assistantIndex]
+        if (msg) {
+          msg.content = result.answer
+          msg.context = result.context_snippet
+        }
+        streamingStatus.value = ''
+        loading.value = false
+        abortController.value = null
+      },
+      (error) => {
+        const msg = messages.value[assistantIndex]
+        if (msg && !msg.content) {
+          msg.content = `回答生成失败: ${error}`
+        }
+        streamingStatus.value = ''
+        loading.value = false
+        abortController.value = null
+      }
+    )
 
     inputQuestion.value = ''
 
-    // Scroll to bottom
     await nextTick()
     scrollToBottom()
   } catch (error) {
     console.error('Error asking question:', error)
     message.error('请求失败，请检查网络连接')
-    messages.value.pop() // Remove user message on error
-  } finally {
+    messages.value.pop()
     loading.value = false
   }
 }
 
 function clearMessages() {
+  if (abortController.value) {
+    abortController.value.abort()
+    abortController.value = null
+  }
   messages.value = []
   inputQuestion.value = ''
+  streamingStatus.value = ''
+  loading.value = false
 }
 
 function resetModal() {
+  if (abortController.value) {
+    abortController.value.abort()
+    abortController.value = null
+  }
   messages.value = []
   inputQuestion.value = ''
   loading.value = false
+  streamingStatus.value = ''
 }
 
 function scrollToBottom() {
@@ -276,26 +309,6 @@ function scrollToBottom() {
   if (container) {
     container.scrollTop = container.scrollHeight
   }
-}
-
-// Format answer with basic markdown support
-function formatAnswer(text: string): string {
-  let formatted = text
-    // Bold
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    // Italic
-    .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    // Code
-    .replace(/`(.*?)`/g, '<code>$1</code>')
-    // Line breaks
-    .replace(/\n/g, '<br>')
-    // Lists
-    .replace(/^- (.*?)$/gm, '<li>$1</li>')
-
-  // Wrap consecutive list items in ul
-  formatted = formatted.replace(/(<li>.*?<\/li>[\n]?)+/gs, (match) => `<ul>${match}</ul>`)
-
-  return formatted
 }
 </script>
 
@@ -395,31 +408,105 @@ function formatAnswer(text: string): string {
   color: #333;
 }
 
-.answer-text {
-  line-height: 1.6;
+.markdown-content {
+  line-height: 1.7;
   word-break: break-word;
 }
 
-.answer-text strong {
-  color: #d4af37;
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4) {
+  margin: 12px 0 8px;
+  font-weight: 600;
+  color: #333;
+}
+
+.markdown-content :deep(h1) { font-size: 18px; }
+.markdown-content :deep(h2) { font-size: 16px; }
+.markdown-content :deep(h3) { font-size: 15px; }
+.markdown-content :deep(h4) { font-size: 14px; }
+
+.markdown-content :deep(p) {
+  margin: 0 0 8px;
+  line-height: 1.7;
+}
+
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+  margin: 4px 0 8px;
+  padding-left: 20px;
+}
+
+.markdown-content :deep(li) {
+  margin: 2px 0;
+  line-height: 1.6;
+}
+
+.markdown-content :deep(code) {
+  font-size: 13px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.06);
+  color: #d63384;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+}
+
+.markdown-content :deep(pre) {
+  margin: 8px 0;
+  padding: 12px;
+  border-radius: 8px;
+  background: #1e1e1e;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.markdown-content :deep(pre code) {
+  background: none;
+  color: #d4d4d4;
+  padding: 0;
+}
+
+.markdown-content :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.markdown-content :deep(th),
+.markdown-content :deep(td) {
+  padding: 6px 10px;
+  border: 1px solid #e0e0e0;
+  text-align: left;
+}
+
+.markdown-content :deep(th) {
+  background: #f5f5f5;
   font-weight: 600;
 }
 
-.answer-text code {
-  background: rgba(212, 175, 55, 0.1);
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: 'Courier New', monospace;
-  color: #b8860b;
-}
-
-.answer-text ul {
+.markdown-content :deep(blockquote) {
   margin: 8px 0;
-  padding-left: 24px;
+  padding: 6px 12px;
+  border-left: 3px solid #d4af37;
+  background: #fafafa;
+  color: #666;
 }
 
-.answer-text li {
-  margin: 4px 0;
+.markdown-content :deep(strong) {
+  font-weight: 700;
+  color: #333;
+}
+
+.markdown-content :deep(a) {
+  color: #1890ff;
+  text-decoration: none;
+}
+
+.markdown-content :deep(a:hover) {
+  text-decoration: underline;
 }
 
 .context-info {

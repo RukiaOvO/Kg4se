@@ -1,156 +1,195 @@
 # 本体类型约束配置
 # 定义允许的节点类型与属性要求
-# 优化版本：仅包含软件工程领域的5个核心实体
 
-# 配置版本号（用于治理元数据追踪）
-version: "2.0.0-software-engineering"
+# 配置版本号
+version: "3.0.0-graphrag-pipeline"
 
 # 节点类型定义
-# 限制为5种核心实体：知识点、知识点内容、文档、题目、时间戳
 node_types:
-  KnowledgePoint:
-    description: "软件工程领域的知识点（核心概念、技术、方法论）"
-    required_properties:
-      - name           # 知识点名称
-      - id             # 唯一标识
-    optional_properties:
-      - description    # 知识点描述
-      - domain         # 所属领域（必须为 software_engineering）
-      - category       # 分类（design_pattern, algorithm, principle, architecture, etc.）
-      - level          # 知识点等级（基础、中级、高级）
-      - keywords       # 关键词列表
-      - aliases        # 别名列表
-      - embedding      # 向量表示
-      - created_at     # 创建时间
-      - updated_at     # 更新时间
-      - build_version  # 构建版本
-    
-  Content:
-    description: "知识点的具体内容（定义、说明、示例）"
-    required_properties:
-      - text           # 内容文本
-      - id             # 唯一标识
-    optional_properties:
-      - type           # 内容类型 (definition, explanation, example, note)
-      - language       # 使用的编程语言（如果适用）
-      - code_snippet   # 代码片段
-      - created_at     # 创建时间
-      - updated_at     # 更新时间
-      - embedding      # 向量表示
-    
   Document:
-    description: "源文档（教材、论文、博客、代码仓库等）"
+    description: "源文档"
     required_properties:
-      - title          # 文档标题
-      - id             # 唯一标识
+      - title
+      - id
     optional_properties:
-      - url            # 文档链接
-      - source_type    # 源类型 (textbook, paper, blog, repository, tutorial)
-      - author         # 作者
-      - created_at     # 创建时间
-      - updated_at     # 更新时间
-    
-  Question:
-    description: "实践题目或练习（用于巩固知识）"
+      - url
+      - source_type
+      - author
+      - doc_id
+      - created_at
+      - updated_at
+
+  Chunk:
+    description: "文本块"
     required_properties:
-      - title          # 题目标题
-      - id             # 唯一标识
+      - id
+      - doc_id
+      - text
     optional_properties:
-      - description    # 题目描述
-      - difficulty     # 难度等级 (easy, medium, hard)
-      - category       # 题目分类
-      - url            # 题目链接
-      - created_at     # 创建时间
-      - updated_at     # 更新时间
-    
-  Timestamp:
-    description: "文档的更新时间戳"
+      - resolved_text
+      - chunk_index
+      - section_path
+      - page_num
+      - sentence_ids
+      - sentence_count
+      - window_start
+      - window_end
+      - embedding
+      - coreference_aliases
+      - coref_mode
+      - build_version
+      - created_at
+      - updated_at
+
+  Concept:
+    description: "概念实体"
     required_properties:
-      - value          # 时间戳值
-      - id             # 唯一标识
+      - name
+      - id
     optional_properties:
-      - formatted_date # 格式化日期
-      - epoch_seconds  # Unix 时间戳
+      - description
+      - domain
+      - aliases
+      - importance
+      - frequency
+      - embedding
+      - build_version
+      - created_at
+      - updated_at
+
+  Claim:
+    description: "论断/声明"
+    required_properties:
+      - id
+      - text
+    optional_properties:
+      - doc_id
+      - chunk_id
+      - sentence_ids
+      - claim_type
+      - confidence
+      - modality
+      - polarity
+      - certainty
+      - evidence_span
+      - section_path
+      - embedding
+      - build_version
+      - created_at
+      - updated_at
+
+  Theme:
+    description: "主题社区"
+    required_properties:
+      - id
+      - label
+    optional_properties:
+      - summary
+      - level
+      - member_count
+      - keywords
+      - embedding
+      - build_version
+      - created_at
+      - updated_at
+
+  Entity:
+    description: "通用实体"
+    required_properties:
+      - id
+      - name
+    optional_properties:
+      - description
+      - type
+      - properties
+      - embedding
+      - build_version
+      - created_at
+      - updated_at
 
 # 关系类型定义
-# 仅包含5种标准关系，其他所有关系均被过滤
 relationship_types:
-  BELONGS_TO:
-    description: "子知识点属于父知识点"
-    source: [KnowledgePoint]
-    target: [KnowledgePoint]
+  MENTIONS:
+    description: "Chunk 提及 Concept"
+    source: [Chunk, Document]
+    target: [Concept, Claim]
     properties:
-      - confidence     # 置信度
-  
-  FROM:
-    description: "知识点从该文档中提取"
-    source: [KnowledgePoint]
-    target: [Document]
+      - confidence
+
+  CONTAINS_CLAIM:
+    description: "Chunk 包含 Claim"
+    source: [Chunk]
+    target: [Claim]
     properties:
-      - section        # 文档章节
-      - page_num       # 页码
-      - confidence     # 置信度
-  
-  PRACTICES_IS:
-    description: "题目中提到了该知识点"
-    source: [Question]
-    target: [KnowledgePoint]
+      - confidence
+
+  BELONGS_TO_THEME:
+    description: "Concept 属于 Theme"
+    source: [Concept, Claim]
+    target: [Theme]
     properties:
-      - difficulty     # 题目难度
-      - type           # 题目类型
-      - confidence     # 置信度
-  
-  HAS_TIMESTAMP:
-    description: "文档是什么时候更新的"
+      - confidence
+
+  RELATED_TO:
+    description: "Concept 之间的关联"
+    source: [Concept, Claim, Document]
+    target: [Concept, Claim, Document]
+    properties:
+      - confidence
+
+  SUPPORTS:
+    description: "Claim 支持 Concept"
+    source: [Claim]
+    target: [Concept, Claim]
+    properties:
+      - confidence
+
+  CONTRADICTS:
+    description: "Claim 反驳 Concept"
+    source: [Claim]
+    target: [Concept, Claim]
+    properties:
+      - confidence
+
+  EVIDENCE_FROM:
+    description: "证据来源"
+    source: [Concept, Claim]
+    target: [Chunk]
+    properties:
+      - confidence
+      - doc_id
+      - section_path
+      - sentence_ids
+
+  CONTAINS:
+    description: "Document 包含 Chunk"
     source: [Document]
-    target: [Timestamp]
-    properties: []
-  
-  IS:
-    description: "知识点的具体内容是什么"
-    source: [KnowledgePoint]
-    target: [Content]
+    target: [Chunk]
     properties:
-      - confidence     # 置信度
+      - confidence
+
+  BELONGS_TO:
+    description: "归属关系"
+    source: [Concept, Document]
+    target: [Concept, Document, Theme]
+    properties:
+      - confidence
+
+  RELATION:
+    description: "通用关系"
+    source: [Concept, Claim, Document, Chunk]
+    target: [Concept, Claim, Document, Chunk]
+    properties:
+      - confidence
+      - weight
 
 # 域约束
 domain_constraints:
-  # 仅允许软件工程领域
   allowed_domains:
     - "software_engineering"
-  
-  # 知识点分类
-  knowledge_point_categories:
-    - "design_pattern"     # 设计模式
-    - "algorithm"          # 算法
-    - "principle"          # 原则
-    - "architecture"       # 架构
-    - "methodology"        # 方法论
-    - "best_practice"      # 最佳实践
-    - "programming_paradigm"  # 编程范型
-    - "data_structure"     # 数据结构
-    - "testing"            # 测试
-    - "documentation"      # 文档
-    - "refactoring"        # 重构
-    - "performance"        # 性能优化
-    - "security"           # 安全
-    - "scalability"        # 可扩展性
-    - "maintenance"        # 可维护性
 
 # 数据质量约束
 quality_constraints:
-  # 知识点名称长度
-  knowledge_point_name_min_length: 2
-  knowledge_point_name_max_length: 100
-  
-  # 内容文本长度
-  content_text_min_length: 10
-  content_text_max_length: 5000
-  
-  # 置信度范围
   confidence_min: 0.0
   confidence_max: 1.0
-  
-  # 嵌入维度（OpenAI text-embedding-3-small）
   embedding_dimension: 1536
-

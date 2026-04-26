@@ -91,24 +91,29 @@
                       border-radius="3px"
                       :color="getProgressColor(task.status)"
                     />
+                    <div class="pipeline-stages">
+                      <div 
+                        v-for="(stage, idx) in pipelineStages" 
+                        :key="idx"
+                        class="pipeline-stage"
+                        :class="{
+                          active: getStageIndex(task) === idx,
+                          completed: getStageIndex(task) > idx,
+                          pending: getStageIndex(task) < idx
+                        }"
+                      >
+                        <div class="stage-dot">
+                          <n-icon v-if="getStageIndex(task) > idx" size="10" :component="CheckmarkCircleOutline" />
+                          <span v-else>{{ idx + 1 }}</span>
+                        </div>
+                        <span class="stage-label">{{ stage }}</span>
+                      </div>
+                    </div>
                   </div>
 
                   <!-- Status Message (completed/failed) -->
                   <div v-else class="task-status">
                     <span class="status-message">{{ task.message || getStatusMessage(task.status) }}</span>
-                  </div>
-
-                  <!-- AI Mode Badge -->
-                  <div v-if="task.aiMode" class="ai-mode-badge">
-                    <n-tag type="success" size="tiny" :bordered="false">
-                      <template #icon>
-                        <n-icon :component="SparklesOutline" />
-                      </template>
-                      AI 模式
-                    </n-tag>
-                    <n-tag v-if="task.aiStats?.model" type="info" size="tiny" :bordered="false">
-                      {{ task.aiStats.model }}
-                    </n-tag>
                   </div>
 
                   <!-- Stats (completed only) -->
@@ -118,21 +123,16 @@
                       <span class="stat-value">{{ task.stats.chunks }}</span>
                     </div>
                     <div class="stat-chip">
-                      <span class="stat-label">三元组</span>
-                      <span class="stat-value">{{ task.stats.triplets }}</span>
+                      <span class="stat-label">实体</span>
+                      <span class="stat-value">{{ task.stats.entities }}</span>
                     </div>
                     <div class="stat-chip">
-                      <span class="stat-label">概念</span>
-                      <span class="stat-value">{{ task.stats.concepts }}</span>
+                      <span class="stat-label">论断</span>
+                      <span class="stat-value">{{ task.stats.claims }}</span>
                     </div>
-                  </div>
-
-                  <!-- AI Tokens (completed and AI mode) -->
-                  <div v-if="task.status === 'completed' && task.aiMode && task.aiStats" class="ai-tokens-stats">
-                    <div class="tokens-chip">
-                      <span class="tokens-icon">📊</span>
-                      <span class="tokens-label">Tokens:</span>
-                      <span class="tokens-value">{{ formatNumber(task.aiStats.totalTokens) }}</span>
+                    <div class="stat-chip">
+                      <span class="stat-label">主题</span>
+                      <span class="stat-value">{{ task.stats.themes }}</span>
                     </div>
                   </div>
                 </div>
@@ -177,13 +177,38 @@ import {
   CheckmarkCircleOutline,
   AlertCircleOutline,
   TimeOutline,
-  SparklesOutline,
   StopCircleOutline
 } from '@vicons/ionicons5'
 
 const router = useRouter()
 const message = useMessage()
 const processingStore = useProcessingStore()
+
+const pipelineStages = [
+  '分块', '消解', '实体', '论断', '主题', '治理', '存储', '度量'
+]
+
+const pipelineStageKeywords: Record<number, string[]> = {
+  0: ['分块', 'chunk', 'stage 0', '阶段 0'],
+  1: ['消解', 'coref', 'stage 1', '阶段 1'],
+  2: ['实体', 'entity', 'link', 'stage 2', '阶段 2'],
+  3: ['论断', 'claim', 'extract', 'stage 3', '阶段 3'],
+  4: ['主题', 'theme', 'stage 4', '阶段 4'],
+  5: ['谓词', 'govern', 'predicate', 'stage 5', '阶段 5'],
+  6: ['存储', 'graph', 'store', 'stage 6', '阶段 6'],
+  7: ['度量', 'metric', 'quality', 'stage 8', '阶段 8']
+}
+
+const getStageIndex = (task: any): number => {
+  const msg = (task.message || '').toLowerCase()
+  for (let i = 7; i >= 0; i--) {
+    const keywords = pipelineStageKeywords[i] || []
+    if (keywords.some(kw => msg.includes(kw))) {
+      return i
+    }
+  }
+  return 0
+}
 
 const getStatusIcon = (status: string) => {
   switch (status) {
@@ -241,11 +266,6 @@ const handleClose = () => {
 
 const handleViewGraph = () => {
   router.push('/graph')
-}
-
-const formatNumber = (num: number | undefined) => {
-  if (!num) return '0'
-  return num.toLocaleString('zh-CN')
 }
 </script>
 
@@ -434,6 +454,65 @@ const formatNumber = (num: number | undefined) => {
               color: #c2a474;
             }
           }
+
+          .pipeline-stages {
+            display: flex;
+            gap: 2px;
+            margin-top: 8px;
+
+            .pipeline-stage {
+              flex: 1;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              gap: 3px;
+
+              .stage-dot {
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 9px;
+                font-weight: 700;
+                background: #e2e8f0;
+                color: #94a3b8;
+                transition: all 0.3s ease;
+              }
+
+              .stage-label {
+                font-size: 9px;
+                color: #94a3b8;
+                font-weight: 500;
+                white-space: nowrap;
+                transition: all 0.3s ease;
+              }
+
+              &.completed {
+                .stage-dot {
+                  background: #18a058;
+                  color: #fff;
+                }
+                .stage-label {
+                  color: #18a058;
+                }
+              }
+
+              &.active {
+                .stage-dot {
+                  background: #c2a474;
+                  color: #fff;
+                  box-shadow: 0 0 0 3px rgba(194, 164, 116, 0.25);
+                  animation: pulse-dot 1.5s ease-in-out infinite;
+                }
+                .stage-label {
+                  color: #c2a474;
+                  font-weight: 700;
+                }
+              }
+            }
+          }
         }
 
         .task-status {
@@ -442,13 +521,6 @@ const formatNumber = (num: number | undefined) => {
             color: #64748b;
             font-weight: 500;
           }
-        }
-
-        .ai-mode-badge {
-          display: flex;
-          gap: 6px;
-          margin-top: 8px;
-          flex-wrap: wrap;
         }
 
         .task-stats {
@@ -480,38 +552,6 @@ const formatNumber = (num: number | undefined) => {
           }
         }
 
-        .ai-tokens-stats {
-          margin-top: 8px;
-
-          .tokens-chip {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            background: linear-gradient(135deg, rgba(194, 164, 116, 0.1) 0%, rgba(155, 135, 245, 0.1) 100%);
-            border-radius: 8px;
-            border: 1px solid rgba(194, 164, 116, 0.25);
-
-            .tokens-icon {
-              font-size: 14px;
-            }
-
-            .tokens-label {
-              font-size: 11px;
-              color: #64748b;
-              font-weight: 500;
-            }
-
-            .tokens-value {
-              font-size: 13px;
-              font-weight: 700;
-              background: linear-gradient(135deg, #c2a474 0%, #9b87f5 100%);
-              -webkit-background-clip: text;
-              -webkit-text-fill-color: transparent;
-              background-clip: text;
-            }
-          }
-        }
       }
     }
   }
@@ -582,6 +622,15 @@ const formatNumber = (num: number | undefined) => {
   to {
     max-height: 500px;
     opacity: 1;
+  }
+}
+
+@keyframes pulse-dot {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(194, 164, 116, 0.25);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(194, 164, 116, 0.1);
   }
 }
 

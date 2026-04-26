@@ -1,10 +1,7 @@
 """
 阶段 5: 谓词治理 (Predicate Governor)
 
-规范化谓词，映射自然语言关系到标准谓词集（仅允许5种）
-- 软件工程领域优化版本
-- 仅处理5种标准关系：BELONGS_TO, FROM, PRACTICES_IS, HAS_TIMESTAMP, IS
-- 拒绝所有其他关系类型
+规范化谓词，映射自然语言关系到标准谓词集
 """
 
 import logging
@@ -14,41 +11,38 @@ from graphrag.config import get_config, ConstraintResult, GovernanceStatus
 
 logger = logging.getLogger("graphrag.stage5")
 
-# 允许的谓词集合（软件工程领域）
 ALLOWED_PREDICATES = {
-    "BELONGS_TO",      # 子知识点属于父知识点
-    "FROM",            # 知识点从文档中提取
-    "PRACTICES_IS",    # 题目中提到知识点
-    "HAS_TIMESTAMP",   # 文档的更新时间戳
-    "IS",              # 知识点的内容是什么
-    
-    # 新增软件工程领域常见关系
-    "USES",            # 使用某种方法/工具
-    "IMPLEMENTS",      # 实现某个概念
-    "COMPARES_WITH",   # 比较关系
-    "DEPENDS_ON",      # 依赖关系
-    "CONTAINS",        # 包含关系
-    "RELATES_TO",      # 相关关系
-    "MENTIONS"         # 提到/引用
+    "MENTIONS",
+    "CONTAINS_CLAIM",
+    "BELONGS_TO_THEME",
+    "RELATED_TO",
+    "SUPPORTS",
+    "CONTRADICTS",
+    "EVIDENCE_FROM",
+    "CONTAINS",
+    "BELONGS_TO",
+    "RELATION",
+    "USES",
+    "IMPLEMENTS",
+    "COMPARES_WITH",
+    "DEPENDS_ON",
 }
 
 
 class PredicateGovernor:
     """
-    谓词治理器（软件工程领域优化版本）
+    谓词治理器
     
-    将自然语言谓词映射到5种标准谓词集，并验证类型约束
-    - 仅允许5种标准谓词
-    - 严格拒绝所有其他关系
+    将自然语言谓词映射到标准谓词集，并验证类型约束
     """
     
     def __init__(self):
         self.config = get_config()
-        logger.info("PredicateGovernor initialized (software engineering domain, 5 predicates only)")
+        logger.info("PredicateGovernor initialized")
     
     def normalize(self, predicate: str, source_type: str, target_type: str) -> Dict[str, Any]:
         """
-        规范化谓词并返回治理结果（仅允许5种关系）
+        规范化谓词并返回治理结果
         
         Args:
             predicate: 原始谓词
@@ -56,20 +50,10 @@ class PredicateGovernor:
             target_type: 目标节点类型
         
         Returns:
-            包含治理结果的字典：
-            {
-                'original_predicate': str,      # 原始谓词
-                'normalized_predicate': str,    # 标准谓词
-                'confidence': float,            # 置信度
-                'constraint_result': ConstraintResult,  # 约束检查结果
-                'governance_status': GovernanceStatus,   # 治理状态
-                'predicate_version': str,       # 谓词配置版本
-                'ontology_version': str         # 本体配置版本
-            }
+            包含治理结果的字典
         """
         logger.debug(f"规范化谓词: {predicate} ({source_type} -> {target_type})")
         
-        # 初始化结果
         result = {
             'original_predicate': predicate,
             'normalized_predicate': None,
@@ -81,9 +65,7 @@ class PredicateGovernor:
             'reason': '谓词不在允许列表中'
         }
         
-        # 1. 检查是否为标准谓词（5种之一）
         if predicate in ALLOWED_PREDICATES:
-            # 验证类型约束
             is_valid = self._validate_type_constraint(
                 source_type, predicate, target_type
             )
@@ -107,10 +89,8 @@ class PredicateGovernor:
                 logger.warning(f"❌ 标准谓词类型约束失败: {source_type} -{predicate}-> {target_type}")
                 return result
         
-        # 2. 尝试映射自然语言谓词到5种标准谓词之一
         normalized = self._map_to_allowed_predicate(predicate)
         if normalized:
-            # 验证类型约束
             is_valid = self._validate_type_constraint(
                 source_type, normalized, target_type
             )
@@ -118,7 +98,7 @@ class PredicateGovernor:
             if is_valid:
                 result.update({
                     'normalized_predicate': normalized,
-                    'confidence': 0.9,  # 映射的谓词置信度稍低
+                    'confidence': 0.9,
                     'constraint_result': ConstraintResult.PASS,
                     'governance_status': GovernanceStatus.ACCEPTED,
                     'reason': f'自然语言谓词映射: {predicate} -> {normalized}'
@@ -134,11 +114,10 @@ class PredicateGovernor:
                 logger.warning(f"❌ 映射谓词类型约束失败: {source_type} -{normalized}-> {target_type}")
                 return result
         
-        # 3. 未匹配到任何允许的谓词 - 直接拒绝
         result.update({
             'confidence': 0.0,
             'governance_status': GovernanceStatus.REJECTED,
-            'reason': f'谓词 "{predicate}" 无法映射到允许列表中的5种谓词'
+            'reason': f'谓词 "{predicate}" 无法映射到允许列表中的标准谓词'
         })
         logger.warning(f"❌ 谓词被拒绝（不在允许列表中）: {predicate}")
         return result
@@ -155,128 +134,69 @@ class PredicateGovernor:
         """
         predicate_lower = predicate.lower().strip()
         
-        # 配置映射规则
         mappings = {
-            # BELONGS_TO 映射
             "属于": "BELONGS_TO",
             "隶属于": "BELONGS_TO",
-            "归于": "BELONGS_TO",
-            "是...的子知识点": "BELONGS_TO",
-            "属于...知识点": "BELONGS_TO",
             "is_a": "BELONGS_TO",
             "subclass_of": "BELONGS_TO",
             "子类": "BELONGS_TO",
             "分类": "BELONGS_TO",
             "归类": "BELONGS_TO",
             
-            # FROM 映射
-            "来自": "FROM",
-            "源自": "FROM",
-            "来源于": "FROM",
-            "提取自": "FROM",
-            "从...提取": "FROM",
-            "在...中提到": "FROM",
-            "extracted_from": "FROM",
-            "mentioned_in": "FROM",
-            "出自": "FROM",
-            "来自文档": "FROM",
+            "来自": "EVIDENCE_FROM",
+            "源自": "EVIDENCE_FROM",
+            "来源于": "EVIDENCE_FROM",
+            "提取自": "EVIDENCE_FROM",
+            "extracted_from": "EVIDENCE_FROM",
+            "出自": "EVIDENCE_FROM",
             
-            # PRACTICES_IS 映射
-            "题目包含": "PRACTICES_IS",
-            "练习": "PRACTICES_IS",
-            "应用": "PRACTICES_IS",
-            "实践": "PRACTICES_IS",
-            "用于...练习": "PRACTICES_IS",
-            "practiced_in": "PRACTICES_IS",
-            "used_in_exercise": "PRACTICES_IS",
-            "应用于": "PRACTICES_IS",
-            "应用场景": "PRACTICES_IS",
-            
-            # HAS_TIMESTAMP 映射
-            "更新于": "HAS_TIMESTAMP",
-            "更新时间": "HAS_TIMESTAMP",
-            "创建于": "HAS_TIMESTAMP",
-            "发布于": "HAS_TIMESTAMP",
-            "timestamp": "HAS_TIMESTAMP",
-            "updated_at": "HAS_TIMESTAMP",
-            "created_at": "HAS_TIMESTAMP",
-            "时间戳": "HAS_TIMESTAMP",
-            
-            # IS 映射
-            "是": "IS",
-            "定义为": "IS",
-            "定义": "IS",
-            "内容是": "IS",
-            "描述为": "IS",
-            "defined_as": "IS",
-            "is_defined_as": "IS",
-            "表示": "IS",
-            "含义是": "IS",
-            
-            # USES 映射
-            "使用": "USES",
-            "采用": "USES",
-            "运用": "USES",
-            "利用": "USES",
-            "uses": "USES",
-            "utilizes": "USES",
-            "使用方法": "USES",
-            "使用工具": "USES",
-            
-            # IMPLEMENTS 映射
-            "实现": "IMPLEMENTS",
-            "实现了": "IMPLEMENTS",
-            "实现方法": "IMPLEMENTS",
-            "实现方式": "IMPLEMENTS",
-            "implements": "IMPLEMENTS",
-            "implementation_of": "IMPLEMENTS",
-            
-            # COMPARES_WITH 映射
-            "比较": "COMPARES_WITH",
-            "对比": "COMPARES_WITH",
-            "相比": "COMPARES_WITH",
-            "compare": "COMPARES_WITH",
-            "compared_with": "COMPARES_WITH",
-            "与...对比": "COMPARES_WITH",
-            
-            # DEPENDS_ON 映射
-            "依赖": "DEPENDS_ON",
-            "依赖于": "DEPENDS_ON",
-            "取决于": "DEPENDS_ON",
-            "depends_on": "DEPENDS_ON",
-            "依赖关系": "DEPENDS_ON",
-            "依赖于...": "DEPENDS_ON",
-            
-            # CONTAINS 映射
-            "包含": "CONTAINS",
-            "包含了": "CONTAINS",
-            "包含有": "CONTAINS",
-            "contains": "CONTAINS",
-            "包含关系": "CONTAINS",
-            
-            # RELATES_TO 映射（通用关系）
-            "相关": "RELATES_TO",
-            "与...相关": "RELATES_TO",
-            "关联": "RELATES_TO",
-            "相关于": "RELATES_TO",
-            "relates_to": "RELATES_TO",
-            "related_to": "RELATES_TO",
-            "联系": "RELATES_TO",
-            
-            # MENTIONS 映射
             "提到": "MENTIONS",
             "提及": "MENTIONS",
             "引用": "MENTIONS",
             "mentions": "MENTIONS",
             "references": "MENTIONS",
             "引用了": "MENTIONS",
+            "在...中提到": "MENTIONS",
+            
+            "包含": "CONTAINS",
+            "包含了": "CONTAINS",
+            "contains": "CONTAINS",
+            
+            "相关": "RELATED_TO",
+            "与...相关": "RELATED_TO",
+            "关联": "RELATED_TO",
+            "relates_to": "RELATED_TO",
+            "related_to": "RELATED_TO",
+            "联系": "RELATED_TO",
+            
+            "使用": "USES",
+            "采用": "USES",
+            "uses": "USES",
+            "utilizes": "USES",
+            
+            "实现": "IMPLEMENTS",
+            "实现了": "IMPLEMENTS",
+            "implements": "IMPLEMENTS",
+            
+            "比较": "COMPARES_WITH",
+            "对比": "COMPARES_WITH",
+            "compared_with": "COMPARES_WITH",
+            
+            "依赖": "DEPENDS_ON",
+            "依赖于": "DEPENDS_ON",
+            "depends_on": "DEPENDS_ON",
+            
+            "支持": "SUPPORTS",
+            "supports": "SUPPORTS",
+            
+            "反驳": "CONTRADICTS",
+            "contradicts": "CONTRADICTS",
+            "与...矛盾": "CONTRADICTS",
         }
         
-        # 精确匹配
         if predicate_lower in mappings:
             return mappings[predicate_lower]
         
-        # 子串匹配
         for key, value in mappings.items():
             if key in predicate_lower or predicate_lower in key:
                 return value
@@ -295,57 +215,63 @@ class PredicateGovernor:
         Returns:
             是否通过约束验证
         """
-        # 定义允许的关系及其类型约束
-        # 支持多种节点类型：Concept, KnowledgePoint, Document, Question, etc.
         type_constraints = {
-            "BELONGS_TO": {  # 子知识点属于父知识点
-                "sources": ["KnowledgePoint", "Concept"],
-                "targets": ["KnowledgePoint", "Concept"]
+            "MENTIONS": {
+                "sources": ["Chunk", "Document"],
+                "targets": ["Concept", "Claim"]
             },
-            "FROM": {  # 知识点从文档中提取
-                "sources": ["KnowledgePoint", "Concept"],
-                "targets": ["Document"]
+            "CONTAINS_CLAIM": {
+                "sources": ["Chunk"],
+                "targets": ["Claim"]
             },
-            "PRACTICES_IS": {  # 题目中提到知识点
-                "sources": ["Question"],
-                "targets": ["KnowledgePoint", "Concept"]
+            "BELONGS_TO_THEME": {
+                "sources": ["Concept"],
+                "targets": ["Theme"]
             },
-            "HAS_TIMESTAMP": {  # 文档的更新时间戳
+            "RELATED_TO": {
+                "sources": ["Concept", "Claim", "Document"],
+                "targets": ["Concept", "Claim", "Document"]
+            },
+            "SUPPORTS": {
+                "sources": ["Claim"],
+                "targets": ["Concept", "Claim"]
+            },
+            "CONTRADICTS": {
+                "sources": ["Claim"],
+                "targets": ["Concept", "Claim"]
+            },
+            "EVIDENCE_FROM": {
+                "sources": ["Concept", "Claim"],
+                "targets": ["Chunk"]
+            },
+            "CONTAINS": {
                 "sources": ["Document"],
-                "targets": ["Timestamp"]
+                "targets": ["Chunk"]
             },
-            "IS": {  # 知识点的内容是什么
-                "sources": ["KnowledgePoint", "Concept"],
-                "targets": ["Content", "Concept"]
+            "BELONGS_TO": {
+                "sources": ["Concept", "Document"],
+                "targets": ["Concept", "Document", "Theme"]
             },
-            "USES": {  # 使用某种方法/工具
-                "sources": ["KnowledgePoint", "Concept"],
-                "targets": ["KnowledgePoint", "Concept", "Tool"]
+            "RELATION": {
+                "sources": ["Concept", "Claim", "Document", "Chunk"],
+                "targets": ["Concept", "Claim", "Document", "Chunk"]
             },
-            "IMPLEMENTS": {  # 实现某个概念
-                "sources": ["KnowledgePoint", "Concept"],
-                "targets": ["KnowledgePoint", "Concept"]
+            "USES": {
+                "sources": ["Concept"],
+                "targets": ["Concept"]
             },
-            "COMPARES_WITH": {  # 比较关系
-                "sources": ["KnowledgePoint", "Concept"],
-                "targets": ["KnowledgePoint", "Concept"]
+            "IMPLEMENTS": {
+                "sources": ["Concept"],
+                "targets": ["Concept"]
             },
-            "DEPENDS_ON": {  # 依赖关系
-                "sources": ["KnowledgePoint", "Concept"],
-                "targets": ["KnowledgePoint", "Concept"]
+            "COMPARES_WITH": {
+                "sources": ["Concept"],
+                "targets": ["Concept"]
             },
-            "CONTAINS": {  # 包含关系
-                "sources": ["KnowledgePoint", "Concept", "Document"],
-                "targets": ["KnowledgePoint", "Concept"]
+            "DEPENDS_ON": {
+                "sources": ["Concept"],
+                "targets": ["Concept"]
             },
-            "RELATES_TO": {  # 相关关系（通用）
-                "sources": ["KnowledgePoint", "Concept", "Document", "Question"],
-                "targets": ["KnowledgePoint", "Concept", "Document", "Question"]
-            },
-            "MENTIONS": {  # 提到/引用
-                "sources": ["Document", "Question", "KnowledgePoint", "Concept"],
-                "targets": ["KnowledgePoint", "Concept"]
-            }
         }
         
         if predicate not in type_constraints:
@@ -354,7 +280,6 @@ class PredicateGovernor:
         
         constraint = type_constraints[predicate]
         
-        # 检查源节点类型
         if source_type not in constraint["sources"]:
             logger.warning(
                 f"源节点类型不匹配 ({predicate}): "
@@ -362,7 +287,6 @@ class PredicateGovernor:
             )
             return False
         
-        # 检查目标节点类型
         if target_type not in constraint["targets"]:
             logger.warning(
                 f"目标节点类型不匹配 ({predicate}): "
@@ -383,7 +307,6 @@ class PredicateGovernor:
         
         from infra.neo4j_client import neo4j_client
         
-        # 查询文档相关的所有关系（只处理尚未治理的）
         query = """
         MATCH (d:Document {id: $doc_id})-[*1..3]-(n1)-[r]->(n2)
         WHERE type(r) <> 'CONTAINS' AND type(r) <> 'MENTIONS' 
@@ -403,7 +326,6 @@ class PredicateGovernor:
         
         logger.debug(f"[Stage5] 查询返回: {len(result)} 条待处理关系")
         
-        # 统计结果
         stats = {
             'accepted': 0,
             'pending': 0,
@@ -422,10 +344,8 @@ class PredicateGovernor:
             
             unique_predicates.add(rel_type)
             
-            # 规范化谓词并获取治理结果
             governance_result = self.normalize(rel_type, source_type, target_type)
             
-            # 更新统计
             status = governance_result['governance_status']
             if status == GovernanceStatus.ACCEPTED:
                 stats['accepted'] += 1
@@ -439,7 +359,6 @@ class PredicateGovernor:
         
         logger.debug(f"[Stage5] 唯一谓词类型: {unique_predicates}")
         
-        # 遍历结果，准备治理元数据并写入
         for record in result:
             rel_type = record.get("rel_type")
             source_type = record.get("source_type", "Concept")
@@ -447,10 +366,8 @@ class PredicateGovernor:
             rel_id = record.get("rel_id")
             props = record.get("props", {})
             
-            # 规范化谓词并获取治理结果
             governance_result = self.normalize(rel_type, source_type, target_type)
             
-            # 准备治理元数据
             governance_metadata = {
                 'original_predicate': governance_result['original_predicate'],
                 'confidence': governance_result['confidence'],
@@ -461,9 +378,7 @@ class PredicateGovernor:
                 'governed_at': datetime.utcnow().isoformat()
             }
             
-            # 如果谓词需要更新，更新关系类型和治理元数据
             if governance_result['normalized_predicate'] != rel_type:
-                # 清理关系类型名称（移除特殊字符）
                 normalized_rel_type = governance_result['normalized_predicate'].replace('(', '_').replace(')', '')
                 
                 update_query = f"""
@@ -475,7 +390,6 @@ class PredicateGovernor:
                 SET r2 = props, r2 += $metadata
                 """
             else:
-                # 只更新治理元数据
                 update_query = """
                 MATCH ()-[r]->()
                 WHERE elementId(r) = $rel_id
@@ -505,19 +419,10 @@ class PredicateGovernor:
         return stats
     
     def get_governance_stats(self, doc_id: str = None) -> Dict[str, Any]:
-        """
-        获取治理统计信息
-        
-        Args:
-            doc_id: 可选，指定文档ID获取该文档的统计
-            
-        Returns:
-            统计信息字典
-        """
+        """获取治理统计信息"""
         from server.infra.neo4j_client import neo4j_client
         
         if doc_id:
-            # 获取特定文档的统计
             query = """
             MATCH (d:Document {id: $doc_id})-[*1..3]-(n1)-[r]->(n2)
             WHERE r.governance_status IS NOT NULL
@@ -527,7 +432,6 @@ class PredicateGovernor:
             """
             params = {"doc_id": doc_id}
         else:
-            # 获取全局统计
             query = """
             MATCH ()-[r]->()
             WHERE r.governance_status IS NOT NULL
@@ -557,17 +461,14 @@ class PredicateGovernor:
             
             stats['total'] += count
             
-            # 按状态统计
             if status not in stats['by_status']:
                 stats['by_status'][status] = 0
             stats['by_status'][status] += count
             
-            # 按约束结果统计
             if constraint not in stats['by_constraint']:
                 stats['by_constraint'][constraint] = 0
             stats['by_constraint'][constraint] += count
             
-            # 累计主要指标
             if status == 'accepted':
                 stats['accepted'] += count
             elif status == 'pending':
@@ -583,15 +484,7 @@ class PredicateGovernor:
         return stats
     
     def get_pending_relations(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """
-        获取待复核的关系列表
-        
-        Args:
-            limit: 返回数量限制
-            
-        Returns:
-            待复核关系列表
-        """
+        """获取待复核的关系列表"""
         from infra.neo4j_client import neo4j_client
         
         query = """
@@ -614,4 +507,3 @@ class PredicateGovernor:
 
 
 __all__ = ["PredicateGovernor"]
-

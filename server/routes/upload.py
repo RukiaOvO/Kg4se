@@ -13,31 +13,17 @@ from pydantic import BaseModel
 
 from infra.neo4j_client import neo4j_client
 from infra.storage import Storage
-from services.parser import ParserFactory
-from services.extractor import TripletExtractor
-from services.linker import EntityLinker
-from services.graph_service import GraphService
 from services.graphrag_pipeline_service import graphrag_pipeline_service
-from models.document import AIExtractionRequest
 from infra.queue import get_queue
 from config import settings
-from config import get_instance, InstanceNames
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
 
 logger = logging.getLogger("routes.upload")
 
 storage = Storage()
-extractor = TripletExtractor()
-linker = EntityLinker()
-graph_service = GraphService()
 
-# Initialize Redis queue
 queue = get_queue()
-
-def get_ai_segmenter():
-    """Get AI segmenter instance with lazy initialization."""
-    return get_instance(InstanceNames.AI_SEGMENTER)
 
 # Fallback job storage (used when Redis is not available)
 processing_jobs = {}
@@ -297,6 +283,7 @@ async def list_documents(
         coalesce(d.chunk_count, 0) AS chunk_count,
         coalesce(d.concept_count, 0) AS concept_count,
         coalesce(d.claim_count, 0) AS claim_count,
+        coalesce(d.theme_count, 0) AS theme_count,
         coalesce(d.processing_status, "") AS processing_status
     ORDER BY {order_clause}
     SKIP {skip}
@@ -329,6 +316,7 @@ async def list_documents(
             "chunk_count": chunk_count,
             "concept_count": row.get("concept_count", 0) or 0,
             "claim_count": row.get("claim_count", 0) or 0,
+            "theme_count": row.get("theme_count", 0) or 0,
             "processing_status": processing_status
         })
     
@@ -392,7 +380,8 @@ async def get_document(document_id: str):
         "chunk_count": doc_data.get("chunk_count", 0) or 0,
         "concept_count": doc_data.get("concept_count", 0) or 0,
         "claim_count": doc_data.get("claim_count", 0) or 0,
-        "relation_count": doc_data.get("relation_count", 0) or 0
+        "relation_count": doc_data.get("relation_count", 0) or 0,
+        "theme_count": doc_data.get("theme_count", 0) or 0
     }
     
     # 获取关联的主题
@@ -621,13 +610,11 @@ def process_document_background(
     kind: str, 
     job_id: str, 
     chunk_size: int = 2000,
-    enable_ai_segmentation: bool = False,
     user_prompt: Optional[str] = None,
-    optimize_prompt: bool = True,
     root_topic: Optional[str] = None
 ):
     """
-    Background task for processing document into knowledge graph.
+    Background task for processing document into knowledge graph using GraphRAG Pipeline.
     
     Args:
         doc_id: Document ID
@@ -635,9 +622,8 @@ def process_document_background(
         kind: Document type
         job_id: Job ID for tracking
         chunk_size: Maximum characters per chunk (default: 2000)
-        enable_ai_segmentation: Enable AI-powered intelligent segmentation
         user_prompt: User-defined analysis prompt
-        optimize_prompt: Whether to optimize user prompt with AI
+        root_topic: Root topic name
     """
     _update_upload_status(job_id, "processing", 0, "开始处理文档...", documentId=doc_id)
     
@@ -648,7 +634,6 @@ def process_document_background(
         print(f"   - 文件路径: {file_path}")
         print(f"   - 文件类型: {kind}")
         print(f"   - 任务ID: {job_id}")
-        print(f"   - AI智能分词: 启用")
         if user_prompt:
             print(f"   - 用户Prompt: {user_prompt[:100]}...")
         print(f"{'#'*80}\n")
@@ -658,275 +643,49 @@ def process_document_background(
             _update_upload_status(job_id, "cancelled", 0, "任务已被用户取消", documentId=doc_id)
             return
         
-        if graphrag_pipeline_service.is_available():
-            print(f"\n🧠 [GraphRAG Pipeline模式] 使用八阶段知识图谱构建流水线")
-            
-            _update_upload_status(job_id, "processing", 10, "正在解析文档...", documentId=doc_id)
-            
-            try:
-                stats = graphrag_pipeline_service.process_document_sync(
-                    file_path=file_path,
-                    doc_id=doc_id,
-                    root_topic=root_topic,
-                    user_prompt=user_prompt,
-                    timeout=600
-                )
-                
-                print(f"\n🎉 [GraphRAG Pipeline处理完成]")
-                print(f"   - 文本块数: {stats.get('chunks', 0)}")
-                print(f"   - 实体数: {stats.get('entities', 0)}")
-                print(f"   - 论断数: {stats.get('claims', 0)}")
-                print(f"   - 主题数: {stats.get('themes', 0)}")
-                print(f"   - 关系数: {stats.get('relationships', 0)}")
-                print(f"   - 处理耗时: {stats.get('execution_time', 0):.2f}s")
-                
-                quality = stats.get('quality_metrics', {})
-                if quality:
-                    print(f"   - 质量指标:")
-                    print(f"     * 孤立节点比例: {quality.get('isolated_node_ratio', 0):.2%}")
-                    print(f"     * 平均度数: {quality.get('avg_degree', 0):.2f}")
-                
-                result_data = {"stats": stats}
-                if stats.get('quality_metrics'):
-                    result_data["quality_metrics"] = stats['quality_metrics']
-                
-                _update_upload_status(job_id, "completed", 100, "GraphRAG Pipeline处理完成！", documentId=doc_id, **result_data)
-                logger.info(f"GraphRAG Pipeline completed successfully for doc_id: {doc_id}")
-                return
-            
-            except Exception as e:
-                error_msg = f"GraphRAG Pipeline执行失败，回退到传统模式: {str(e)}"
-                print(f"⚠️  {error_msg}")
-                logger.warning(error_msg)
+        if not graphrag_pipeline_service.is_available():
+            raise RuntimeError("GraphRAG Pipeline 服务不可用，请检查配置")
         
-        print(f"\n🤖 [传统模式] 使用传统处理流程")
+        print(f"\n🧠 [GraphRAG Pipeline模式] 使用八阶段知识图谱构建流水线")
         
-        _update_upload_status(job_id, "processing", 10, "正在解析文档...", documentId=doc_id)
+        def on_pipeline_progress(stage_idx: int, stage_name: str, progress: int):
+            _update_upload_status(
+                job_id, "processing", progress,
+                f"阶段 {stage_idx}: {stage_name}",
+                documentId=doc_id,
+                pipeline_stage=stage_idx
+            )
         
-        print(f"📖 [步骤1] 解析文档 (chunk_size={chunk_size})...")
-        parser = ParserFactory.create_parser(kind, chunk_size=chunk_size)
-        full_text, chunks = parser.parse(file_path)
-        print(f"✅ [步骤1] 解析完成: {len(chunks)} 个文本块，总长度 {len(full_text)} 字符")
-        if chunks:
-            avg_chunk_size = sum(len(c.text) for c in chunks) / len(chunks)
-            print(f"   - 平均每个文本块: {avg_chunk_size:.0f} 字符")
+        stats = graphrag_pipeline_service.process_document_sync(
+            file_path=file_path,
+            doc_id=doc_id,
+            root_topic=root_topic,
+            user_prompt=user_prompt,
+            timeout=600,
+            progress_callback=on_pipeline_progress
+        )
         
-        ai_segmenter = get_ai_segmenter()
-        enable_ai_segmentation = True
+        print(f"\n🎉 [GraphRAG Pipeline处理完成]")
+        print(f"   - 文本块数: {stats.get('chunks', 0)}")
+        print(f"   - 实体数: {stats.get('entities', 0)}")
+        print(f"   - 论断数: {stats.get('claims', 0)}")
+        print(f"   - 主题数: {stats.get('themes', 0)}")
+        print(f"   - 关系数: {stats.get('relationships', 0)}")
+        print(f"   - 处理耗时: {stats.get('execution_time', 0):.2f}s")
         
-        if ai_segmenter:
-            print(f"\n🧠 [AI模式] 启用智能知识抽取")
-            
-            final_prompt = None
-            if user_prompt:
-                _update_upload_status(job_id, "processing", 15, "正在优化分析提示词...", documentId=doc_id)
-                
-                if optimize_prompt:
-                    print(f"🔧 [Prompt优化] 优化用户提示词...")
-                    final_prompt = ai_segmenter.optimize_user_prompt(user_prompt)
-                else:
-                    final_prompt = user_prompt
-                    print(f"📝 [Prompt] 使用原始用户提示词")
-            
-            _update_upload_status(job_id, "processing", 20, "正在分析文档结构...", documentId=doc_id)
-            
-            print(f"\n🔍 [文档分析] 分析文档整体结构...")
-            doc_context = ai_segmenter.analyze_document_structure(chunks, final_prompt)
-            print(f"✅ [文档分析] 完成:")
-            print(f"   - 主题: {', '.join(doc_context.get('themes', []))}")
-            print(f"   - 领域: {', '.join(doc_context.get('domains', []))}")
-            print(f"   - 关键概念: {', '.join(doc_context.get('key_concepts', [])[:5])}...")
-            
-            _update_upload_status(job_id, "processing", 30, "正在进行深度知识抽取...", documentId=doc_id)
-            
-            print(f"\n💎 [深度抽取] 开始智能知识抽取 (共 {len(chunks)} 个文本块)...")
-            all_triplets = []
-            all_concepts = []
-            all_insights = []
-            
-            for i, chunk in enumerate(chunks, 1):
-                if _is_job_cancelled(job_id):
-                    print(f"❌ [任务取消] 任务已被用户取消")
-                    _update_upload_status(job_id, "cancelled", progress, "任务已被用户取消", documentId=doc_id)
-                    return
-                
-                print(f"\n📦 [文本块 {i}/{len(chunks)}] AI深度分析中...")
-                knowledge = ai_segmenter.extract_rich_knowledge(chunk, doc_context, final_prompt)
-                
-                triplets = knowledge.get("triplets", [])
-                all_triplets.extend(triplets)
-                
-                concepts = knowledge.get("concepts", [])
-                all_concepts.extend(concepts)
-                
-                insights = knowledge.get("insights", [])
-                all_insights.extend(insights)
-                
-                print(f"   ✓ 提取: {len(triplets)} 个关系, {len(concepts)} 个概念, {len(insights)} 个洞察")
-                
-                progress = 30 + int((i / len(chunks)) * 40)
-                _update_upload_status(job_id, "processing", progress, f"AI深度分析中... ({i}/{len(chunks)})", documentId=doc_id)
-            
-            print(f"\n📊 [深度抽取] 完成:")
-            print(f"   - 总关系数: {len(all_triplets)}")
-            print(f"   - 总概念数: {len(all_concepts)}")
-            print(f"   - 总洞察数: {len(all_insights)}")
-            
-            _update_upload_status(job_id, "processing", 75, "正在构建丰富概念...", documentId=doc_id)
-            
-            print(f"\n💎 [概念构建] 写入丰富概念信息...")
-            graph_service.ingest_rich_concepts(doc_id, all_concepts, root_topic=root_topic)
-            
-            _update_upload_status(job_id, "processing", 80, "正在链接实体...", documentId=doc_id)
-            
-            print(f"\n🔗 [实体链接] 开始实体链接和合并...")
-            linked_triplets = linker.link_and_merge(all_triplets)
-            print(f"✅ [实体链接] 完成: {len(linked_triplets)} 个三元组")
-            
-            _update_upload_status(job_id, "processing", 90, "正在构建知识图谱...", documentId=doc_id)
-            
-            print(f"\n💾 [图谱构建] 开始构建知识图谱...")
-            graph_service.ingest_triplets(doc_id, linked_triplets, root_topic=root_topic)
-            print(f"✅ [图谱构建] 完成")
-            
-            concept_names = set(c["name"] for c in all_concepts)
-            
-            print(f"\n{'#'*80}")
-            print(f"🎉 [AI智能处理] 处理完成!")
-            print(f"   - 文本块数: {len(chunks)}")
-            print(f"   - 丰富概念数: {len(all_concepts)}")
-            print(f"   - 知识关系数: {len(linked_triplets)}")
-            print(f"   - 深度洞察数: {len(all_insights)}")
-            print(f"   - 文本总长度: {len(full_text)} 字符")
-            if all_insights:
-                print(f"\n💡 [关键洞察]:")
-                for insight in all_insights[:3]:
-                    print(f"   • {insight}")
-            print(f"{'#'*80}\n")
-            
-            stats = {
-                "chunks": len(chunks),
-                "triplets": len(linked_triplets),
-                "concepts": len(concept_names),
-                "insights": len(all_insights),
-                "textLength": len(full_text),
-                "mode": "ai_segmentation"
-            }
-            result_data = {"stats": stats}
-            if all_insights:
-                result_data["insights"] = all_insights[:10]
-            
-            try:
-                neo4j_client.execute_query("""
-                    MATCH (d:Document {id: $doc_id})
-                    SET d.stats = $stats,
-                        d.chunk_count = $chunk_count,
-                        d.claim_count = $claim_count,
-                        d.concept_count = $concept_count,
-                        d.relation_count = $relation_count,
-                        d.text_length = $text_length,
-                        d.processing_status = "completed",
-                        d.processed_at = datetime(),
-                        d.updated_at = datetime()
-                    RETURN d
-                """, {
-                    "doc_id": doc_id,
-                    "stats": json.dumps(stats),
-                    "chunk_count": len(chunks),
-                    "claim_count": len(linked_triplets),
-                    "concept_count": len(concept_names),
-                    "relation_count": len(linked_triplets),
-                    "text_length": len(full_text)
-                })
-                print(f"✅ [Neo4j统计更新] 文档统计信息已保存到数据库")
-            except Exception as e:
-                print(f"⚠️  Neo4j统计更新失败: {e}")
-            
-            _update_upload_status(job_id, "completed", 100, "AI智能分析完成！", documentId=doc_id, **result_data)
+        quality = stats.get('quality_metrics', {})
+        if quality:
+            print(f"   - 质量指标:")
+            print(f"     * 孤立节点比例: {quality.get('isolated_node_ratio', 0):.2%}")
+            print(f"     * 平均度数: {quality.get('avg_degree', 0):.2f}")
         
-        else:
-            _update_upload_status(job_id, "processing", 30, f"已提取 {len(chunks)} 个文本块，正在进行知识抽取...", documentId=doc_id)
-            
-            print(f"\n🤖 [步骤2] 开始知识抽取 (共 {len(chunks)} 个文本块)...")
-            all_triplets = []
-            chunk_triplet_counts = []
-            
-            for i, chunk in enumerate(chunks, 1):
-                if _is_job_cancelled(job_id):
-                    print(f"❌ [任务取消] 任务已被用户取消")
-                    _update_upload_status(job_id, "cancelled", progress, "任务已被用户取消", documentId=doc_id)
-                    return
-                
-                print(f"\n📦 [文本块 {i}/{len(chunks)}] 处理中...")
-                triplets = extractor.extract(chunk)
-                all_triplets.extend(triplets)
-                chunk_triplet_counts.append(len(triplets))
-                progress = 30 + int((i / len(chunks)) * 40)
-                _update_upload_status(job_id, "processing", progress, f"正在抽取知识... ({i}/{len(chunks)})", documentId=doc_id)
-            
-            print(f"\n📊 [步骤2] 知识抽取完成:")
-            print(f"   - 总三元组数: {len(all_triplets)}")
-            print(f"   - 各文本块三元组数: {chunk_triplet_counts}")
-            print(f"   - 平均每个文本块: {len(all_triplets) / len(chunks) if chunks else 0:.2f} 个三元组")
-            
-            _update_upload_status(job_id, "processing", 70, f"已抽取 {len(all_triplets)} 个知识三元组，正在链接实体...", documentId=doc_id)
-            
-            print(f"\n🔗 [步骤3] 开始实体链接和合并...")
-            linked_triplets = linker.link_and_merge(all_triplets)
-            print(f"✅ [步骤3] 实体链接完成: {len(linked_triplets)} 个三元组")
-            
-            _update_upload_status(job_id, "processing", 85, "正在构建知识图谱...", documentId=doc_id)
-            
-            print(f"\n💾 [步骤4] 开始构建知识图谱...")
-            graph_service.ingest_triplets(doc_id, linked_triplets, root_topic=root_topic)
-            print(f"✅ [步骤4] 知识图谱构建完成")
-            
-            concept_names = set(t.subject for t in linked_triplets) | set(t.object for t in linked_triplets)
-            
-            print(f"\n{'#'*80}")
-            print(f"🎉 [文档处理] 处理完成!")
-            print(f"   - 文本块数: {len(chunks)}")
-            print(f"   - 知识三元组数: {len(linked_triplets)}")
-            print(f"   - 概念数量: {len(concept_names)}")
-            print(f"   - 文本总长度: {len(full_text)} 字符")
-            print(f"{'#'*80}\n")
+        result_data = {"stats": stats}
+        if stats.get('quality_metrics'):
+            result_data["quality_metrics"] = stats['quality_metrics']
+        
+        _update_upload_status(job_id, "completed", 100, "GraphRAG Pipeline处理完成！", documentId=doc_id, **result_data)
+        logger.info(f"GraphRAG Pipeline completed successfully for doc_id: {doc_id}")
 
-            stats = {
-                "chunks": len(chunks),
-                "triplets": len(linked_triplets),
-                "concepts": len(concept_names),
-                "textLength": len(full_text),
-                "mode": "traditional"
-            }
-
-            try:
-                neo4j_client.execute_query("""
-                    MATCH (d:Document {id: $doc_id})
-                    SET d.stats = $stats,
-                        d.chunk_count = $chunk_count,
-                        d.claim_count = $claim_count,
-                        d.concept_count = $concept_count,
-                        d.relation_count = $relation_count,
-                        d.text_length = $text_length,
-                        d.processing_status = "completed",
-                        d.processed_at = datetime(),
-                        d.updated_at = datetime()
-                    RETURN d
-                """, {
-                    "doc_id": doc_id,
-                    "stats": json.dumps(stats),
-                    "chunk_count": len(chunks),
-                    "claim_count": len(linked_triplets),
-                    "concept_count": len(concept_names),
-                    "relation_count": len(linked_triplets),
-                    "text_length": len(full_text)
-                })
-                print(f"✅ [Neo4j统计更新] 文档统计信息已保存到数据库")
-            except Exception as e:
-                print(f"⚠️  Neo4j统计更新失败: {e}")
-
-            _update_upload_status(job_id, "completed", 100, "知识图谱构建完成！", documentId=doc_id, stats=stats)
-        
     except Exception as e:
         print(f"\n{'#'*80}")
         print(f"❌ [文档处理] 处理失败!")
@@ -946,9 +705,7 @@ async def upload_and_process(
     file: UploadFile = File(...),
     auto_process: bool = True,
     chunk_size: int = 2000,
-    enable_ai_segmentation: str = "false",
     user_prompt: Optional[str] = None,
-    optimize_prompt: str = "true",
     root_topic: Optional[str] = None
 ):
     """
@@ -958,9 +715,7 @@ async def upload_and_process(
         file: 上传的文件
         auto_process: 是否自动处理（默认 True）
         chunk_size: 每个文本块的最大字符数（默认 2000，建议范围：1000-8000）
-        enable_ai_segmentation: 启用AI智能分词（默认 False）
         user_prompt: 用户自定义分析提示词（可选）
-        optimize_prompt: 是否用AI优化用户提示词（默认 True）
         root_topic: 主题根节点名称（可选），如果提供，文件内容将链接到此主题而不是文档
         
     Returns:
@@ -971,27 +726,10 @@ async def upload_and_process(
             "jobId": "..." (if auto_process=True)
         }
     """
-    # 直接从请求体获取原始表单数据（绕过 FastAPI 的自动类型转换）
-    form_data = await request.form()
-    enable_ai_segmentation_raw = form_data.get("enable_ai_segmentation", "false")
-    optimize_prompt_raw = form_data.get("optimize_prompt", "true")
-    
-    # Debug: Print raw values before conversion
-    print(f"\n[DEBUG upload_and_process] 原始表单值:")
-    print(f"  - enable_ai_segmentation_raw: '{enable_ai_segmentation_raw}' (类型: {type(enable_ai_segmentation_raw)})")
-    print(f"  - optimize_prompt_raw: '{optimize_prompt_raw}' (类型: {type(optimize_prompt_raw)})")
-    
-    # 转换为布尔值
-    enable_ai_segmentation = enable_ai_segmentation_raw.lower() == "true"
-    optimize_prompt = optimize_prompt_raw.lower() == "true"
-    
-    # Debug: Print received parameters (after conversion)
     print(f"\n[DEBUG upload_and_process] 接收到参数:")
-    print(f"  - auto_process: {auto_process} (类型: {type(auto_process)})")
-    print(f"  - chunk_size: {chunk_size} (类型: {type(chunk_size)})")
-    print(f"  - enable_ai_segmentation: {enable_ai_segmentation} (类型: {type(enable_ai_segmentation)})")
+    print(f"  - auto_process: {auto_process}")
+    print(f"  - chunk_size: {chunk_size}")
     print(f"  - user_prompt: {user_prompt}")
-    print(f"  - optimize_prompt: {optimize_prompt}")
     print(f"  - root_topic: {root_topic}")
     print(f"  - 文件名: {file.filename}")
     
@@ -1001,12 +739,6 @@ async def upload_and_process(
     if chunk_size > 20000:
         raise HTTPException(status_code=400, detail="chunk_size 不能大于 20000 字符（建议不超过 8000）")
     
-    # Validate AI segmentation
-    if enable_ai_segmentation and not get_ai_segmenter():
-        raise HTTPException(
-            status_code=400, 
-            detail="AI智能分词需要配置 OPENAI_API_KEY 环境变量"
-        )
     # Read file content
     content = await file.read()
     
@@ -1082,9 +814,7 @@ async def upload_and_process(
                     kind,
                     job_id,
                     chunk_size,
-                    enable_ai_segmentation,
                     user_prompt,
-                    optimize_prompt,
                     root_topic,
                     timeout='1h'
                 )
@@ -1114,9 +844,7 @@ async def upload_and_process(
             kind,
             job_id,
             chunk_size,
-            enable_ai_segmentation,
             user_prompt,
-            optimize_prompt,
             root_topic
         )
         
@@ -1161,9 +889,7 @@ class TextUploadRequest(BaseModel):
     title: Optional[str] = None
     auto_process: bool = True
     chunk_size: int = 2000
-    enable_ai_segmentation: bool = False
     user_prompt: Optional[str] = None
-    optimize_prompt: bool = True
     root_topic: Optional[str] = None
 
 
@@ -1173,9 +899,7 @@ class URLUploadRequest(BaseModel):
     title: Optional[str] = None
     auto_process: bool = True
     chunk_size: int = 2000
-    enable_ai_segmentation: bool = False
     user_prompt: Optional[str] = None
-    optimize_prompt: bool = True
     root_topic: Optional[str] = None
 
 
@@ -1192,9 +916,7 @@ async def upload_text(
         title: 文档标题（可选，默认使用前30个字符）
         auto_process: 是否自动处理（默认 True）
         chunk_size: 每个文本块的最大字符数（默认 2000）
-        enable_ai_segmentation: 启用AI智能分词（默认 False）
         user_prompt: 用户自定义分析提示词（可选）
-        optimize_prompt: 是否用AI优化用户提示词（默认 True）
         
     Returns:
         {
@@ -1205,9 +927,7 @@ async def upload_text(
         }
     """
     print(f"\n[DEBUG upload_text] 接收到参数:")
-    print(f"   - enable_ai_segmentation: {request.enable_ai_segmentation} (类型: {type(request.enable_ai_segmentation)})")
     print(f"   - user_prompt: {request.user_prompt}")
-    print(f"   - optimize_prompt: {request.optimize_prompt}")
     print(f"   - root_topic: {request.root_topic}")
     # Validate chunk_size
     chunk_size = request.chunk_size
@@ -1215,13 +935,6 @@ async def upload_text(
         raise HTTPException(status_code=400, detail="chunk_size 不能小于 100 字符")
     if chunk_size > 20000:
         raise HTTPException(status_code=400, detail="chunk_size 不能大于 20000 字符（建议不超过 8000）")
-    
-    # Validate AI segmentation
-    if request.enable_ai_segmentation and not get_ai_segmenter():
-        raise HTTPException(
-            status_code=400, 
-            detail="AI智能分词需要配置 OPENAI_API_KEY 环境变量"
-        )
     
     content = request.content.strip()
     
@@ -1291,9 +1004,7 @@ async def upload_text(
                     "txt",
                     job_id,
                     chunk_size,
-                    request.enable_ai_segmentation,
                     request.user_prompt,
-                    request.optimize_prompt,
                     request.root_topic,
                     timeout='1h'
                 )
@@ -1322,9 +1033,7 @@ async def upload_text(
             "txt",
             job_id,
             chunk_size,
-            request.enable_ai_segmentation,
             request.user_prompt,
-            request.optimize_prompt,
             request.root_topic
         )
         
@@ -1348,9 +1057,7 @@ async def upload_url(
         title: 文档标题（可选，默认使用URL）
         auto_process: 是否自动处理（默认 True）
         chunk_size: 每个文本块的最大字符数（默认 2000）
-        enable_ai_segmentation: 启用AI智能分词（默认 False）
         user_prompt: 用户自定义分析提示词（可选）
-        optimize_prompt: 是否用AI优化用户提示词（默认 True）
         
     Returns:
         {
@@ -1367,12 +1074,6 @@ async def upload_url(
     if chunk_size > 20000:
         raise HTTPException(status_code=400, detail="chunk_size 不能大于 20000 字符（建议不超过 8000）")
     
-    # Validate AI segmentation
-    if request.enable_ai_segmentation and not get_ai_segmenter():
-        raise HTTPException(
-            status_code=400, 
-            detail="AI智能分词需要配置 OPENAI_API_KEY 环境变量"
-        )
     import httpx
     from bs4 import BeautifulSoup
     
@@ -1491,9 +1192,7 @@ async def upload_url(
                     "txt",
                     job_id,
                     chunk_size,
-                    request.enable_ai_segmentation,
                     request.user_prompt,
-                    request.optimize_prompt,
                     request.root_topic,
                     timeout='1h'
                 )
@@ -1522,9 +1221,7 @@ async def upload_url(
             "txt",
             job_id,
             chunk_size,
-            request.enable_ai_segmentation,
             request.user_prompt,
-            request.optimize_prompt,
             request.root_topic
         )
         

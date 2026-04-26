@@ -20,7 +20,7 @@ import asyncio
 import logging
 import time
 import hashlib
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Callable, List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -269,7 +269,8 @@ class GraphRAGPipeline:
         doc_id: str,
         parser_chunks: List[ParserChunk],
         document_meta: Optional[Dict[str, Any]] = None,
-        raw_text: Optional[str] = None
+        raw_text: Optional[str] = None,
+        progress_callback: Optional[Callable[[int, str, int], None]] = None
     ) -> PipelineResult:
         """
         处理文档，构建知识图谱
@@ -279,12 +280,28 @@ class GraphRAGPipeline:
             parser_chunks: Parser预处理后的Chunk列表
             document_meta: 文档元数据（title, source_type, author等）
             raw_text: 原始文本（可选，用于Stage 0重新分块）
+            progress_callback: 进度回调函数 (stage_index, stage_name, progress_percent)
         
         Returns:
             PipelineResult: 构建结果
         """
         start_time = time.time()
         build_version = f"{doc_id}_{int(time.time())}"
+        
+        STAGE_NAMES = {
+            0: "语义分块", 1: "指代消解", 2: "实体链接",
+            3: "论断抽取", 4: "主题构建", 5: "谓词治理",
+            6: "图谱存储", 8: "质量度量"
+        }
+        TOTAL_STAGES = 8
+        
+        def _report_progress(stage_idx: int, progress: int):
+            if progress_callback:
+                stage_name = STAGE_NAMES.get(stage_idx, f"阶段{stage_idx}")
+                try:
+                    progress_callback(stage_idx, stage_name, progress)
+                except Exception:
+                    pass
         
         logger.info(f"{'='*60}")
         logger.info(f"[GraphRAGPipeline] 开始处理文档: doc_id={doc_id}")
@@ -298,9 +315,11 @@ class GraphRAGPipeline:
         )
         
         try:
+            _report_progress(0, 5)
             chunks = await self._run_stage0(
                 doc_id, parser_chunks, raw_text, build_version, result
             )
+            _report_progress(0, int((1 / TOTAL_STAGES) * 100))
             
             if not chunks:
                 result.errors.append("Stage 0: 没有生成有效的Chunk")
@@ -309,22 +328,36 @@ class GraphRAGPipeline:
             
             await self._store_document(doc_id, document_meta, build_version)
             
+            _report_progress(1, int((1 / TOTAL_STAGES) * 100) + 1)
             chunks = await self._run_stage1(chunks, result)
+            _report_progress(1, int((2 / TOTAL_STAGES) * 100))
             
+            _report_progress(2, int((2 / TOTAL_STAGES) * 100) + 1)
             entities = await self._run_stage2(chunks, result)
+            _report_progress(2, int((3 / TOTAL_STAGES) * 100))
             
+            _report_progress(3, int((3 / TOTAL_STAGES) * 100) + 1)
             claims, relations = await self._run_stage3(chunks, result)
+            _report_progress(3, int((4 / TOTAL_STAGES) * 100))
             
+            _report_progress(4, int((4 / TOTAL_STAGES) * 100) + 1)
             themes = await self._run_stage4(doc_id, build_version, result)
+            _report_progress(4, int((5 / TOTAL_STAGES) * 100))
             
+            _report_progress(5, int((5 / TOTAL_STAGES) * 100) + 1)
             governed_claims = await self._run_stage5(claims, result)
+            _report_progress(5, int((6 / TOTAL_STAGES) * 100))
             
+            _report_progress(6, int((6 / TOTAL_STAGES) * 100) + 1)
             await self._run_stage6(
                 doc_id, chunks, entities, governed_claims, relations, result
             )
+            _report_progress(6, int((7 / TOTAL_STAGES) * 100))
             
             if self.config.enable_stage8 and 8 in self.config.stages_to_run:
+                _report_progress(8, int((7 / TOTAL_STAGES) * 100) + 1)
                 await self._run_stage8(doc_id, result)
+                _report_progress(8, 95)
             
             result.chunks_count = len(chunks)
             result.entities_count = len(entities)

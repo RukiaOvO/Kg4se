@@ -77,10 +77,10 @@ class PredicateConfig:
         
         # 不在推荐组合中，但也不是硬违规，标记为软违规
         # 检查是否属于同一大类（如都是实体类型）
-        structural_predicates = {"IS_A", "PART_OF", "USES", "IMPLEMENTED_BY", "CREATES", "DERIVES_FROM", "CONTAINS", "BELONGS_TO"}
+        structural_predicates = {"IS_A", "PART_OF", "USES", "IMPLEMENTED_BY", "CREATES", "DERIVES_FROM", "CONTAINS", "BELONGS_TO", "BELONGS_TO_THEME", "EVIDENCE_FROM"}
         argumentative_predicates = {"SUPPORTS", "CONTRADICTS", "CAUSES", "COMPARES_WITH", "CONDITIONS", "PURPOSE"}
         
-        entity_types = {"Concept", "Method", "Tool", "Person"}
+        entity_types = {"Concept", "Method", "Tool", "Document", "Chunk", "Theme"}
         claim_types = {"Claim", "Hypothesis"}
         
         # 检查是否跨域使用了谓词（软违规）

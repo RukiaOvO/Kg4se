@@ -1,7 +1,7 @@
 """Intelligent Q&A service using Neo4j knowledge graph and AI providers."""
 import json
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Generator
 from infra.ai_providers import AIProviderFactory
 from infra.neo4j_client import neo4j_client
 from services.config_service import config_service
@@ -702,6 +702,233 @@ class QAService:
                 "error": str(e)
             }
     
+    def answer_with_graphrag_stream(
+        self,
+        question: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Stream answer using GraphRAG (knowledge graph + AI).
+        
+        Yields:
+            Dicts with stream tokens or final result
+        """
+        yield {"type": "status", "data": "正在检索知识图谱..."}
+        
+        if not self.ai_client:
+            yield {"type": "error", "data": "AI服务未配置"}
+            return
+        
+        try:
+            kg_context = ""
+            used_kg = False
+            entities = []
+            
+            try:
+                from graphrag.stages.stage7_query_service import QueryService
+                query_svc = QueryService()
+                claim_candidates, concept_candidates = query_svc._multi_path_candidate_generation(
+                    question, "hybrid", 15
+                )
+                claim_candidates = query_svc._graph_prior_collaboration(
+                    claim_candidates, concept_candidates, max_hop=query_svc.max_hop
+                )
+                final_candidates = query_svc._merge_and_rerank(claim_candidates, 5)
+                if final_candidates:
+                    original_count = len(final_candidates)
+                    high_conf_candidates = [c for c in final_candidates if c.confidence >= 0.5]
+                    if high_conf_candidates:
+                        final_candidates = high_conf_candidates
+                    kg_context = self._format_stage7_context(final_candidates, concept_candidates)
+                    used_kg = True
+                    entities = self._stage7_candidates_to_entities(final_candidates, concept_candidates)
+                else:
+                    kg_data = self.query_knowledge_graph(question)
+                    if kg_data.get("entities"):
+                        kg_context = self._format_context(kg_data)
+                        used_kg = True
+                        entities = kg_data.get("entities", [])
+            except Exception as e:
+                logger.warning(f"[QA服务] Stage7高级检索失败，降级到关键词匹配: {e}")
+                kg_data = self.query_knowledge_graph(question)
+                if kg_data.get("entities"):
+                    kg_context = self._format_context(kg_data)
+                    used_kg = True
+                    entities = kg_data.get("entities", [])
+            
+            messages = []
+            system_msg = """你是一个软件工程领域的高级专业问答助手，拥有知识图谱提供的权威结构化知识。
+
+核心优势：你拥有经过严格抽取和验证的知识图谱信息，包括实体概念、关系网络和高质量论断，这是其他方法无法比拟的。
+
+请严格按照以下原则回答：
+1. 充分信任并直接使用知识图谱中的信息，这些信息经过严格验证，准确性极高
+2. 充分利用知识图谱中的实体关系和论断，构建层次分明、逻辑严谨的专业答案
+3. 利用知识图谱的结构化特性，从多个维度和层面全面阐述问题
+4. 当知识图谱信息充足时，直接给出确定性结论，绝不使用"可能"、"或许"等不确定措辞
+5. 当知识图谱信息部分覆盖时，以其为核心框架，补充必要的专业背景，确保答案完整
+6. 答案必须详尽、专业、有深度，充分展现知识图谱在信息覆盖和结构化方面的优势
+7. 使用markdown格式组织答案，包括多级标题、分层列表、加粗重点等，使结构清晰
+8. 对每个关键概念给出定义或解释，对每个重要论断提供支撑依据"""
+            
+            messages.append({"role": "system", "content": system_msg})
+            if conversation_history:
+                messages.extend(conversation_history[-6:])
+            
+            user_content = question
+            if kg_context:
+                user_content = f"""【知识图谱信息】
+{kg_context}
+
+【用户问题】
+{question}"""
+            
+            messages.append({"role": "user", "content": user_content})
+            
+            yield {"type": "status", "data": "正在生成回答..."}
+            
+            full_answer = ""
+            for token in self.ai_client.chat_completion_stream(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=4096
+            ):
+                full_answer += token
+                yield {"type": "token", "data": token}
+            
+            yield {"type": "done", "data": {
+                "answer": full_answer,
+                "used_context": used_kg,
+                "context_snippet": kg_context,
+                "entities": entities
+            }}
+        
+        except Exception as e:
+            logger.error(f"[QA服务] GraphRAG流式回答失败: {e}")
+            import traceback
+            logger.debug(f"[错误详情] {traceback.format_exc()}")
+            yield {"type": "error", "data": str(e)}
+    
+    def answer_with_rag_stream(
+        self,
+        question: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None
+    ) -> Generator[Dict[str, Any], None, None]:
+        yield {"type": "status", "data": "正在检索向量数据库..."}
+
+        if not self.ai_client:
+            yield {"type": "error", "data": "AI服务未配置"}
+            return
+
+        try:
+            vector_context = ""
+            used_vector = False
+
+            vector_results = self._query_vector_store(question)
+            if vector_results:
+                vector_context = "\n\n".join([
+                    f"【文档片段{i+1}】\n类型: {r.get('type', 'unknown')}\n相似度: {r['similarity']:.4f}\n来源: {r.get('source', '')}\n内容: {r['text'][:800]}"
+                    for i, r in enumerate(vector_results)
+                ])
+                used_vector = True
+
+            messages = []
+            system_msg = """你是一个软件工程领域的专业问答助手，基于提供的文档内容回答问题。
+
+你拥有经过检索的专业文档片段作为参考，这为你提供了比纯LLM更可靠的信息来源。
+
+请按照以下原则回答：
+1. 文档中的信息是权威参考资料，请以其为依据构建准确答案
+2. 基于文档中的事实和数据构建详细、准确的答案，充分阐述相关知识点
+3. 当文档信息部分覆盖时，以文档内容为核心，适当补充必要的专业背景
+4. 如果文档信息与自身知识存在冲突，以文档信息为准
+5. 使用专业术语，提供有组织的答案
+6. 使用markdown格式使答案更易阅读，包括标题、列表等
+7. 答案应详尽但聚焦于文档所涵盖的内容范围"""
+
+            messages.append({"role": "system", "content": system_msg})
+            if conversation_history:
+                messages.extend(conversation_history[-6:])
+
+            user_content = question
+            if vector_context:
+                user_content = f"""【参考文档】
+{vector_context}
+
+【用户问题】
+{question}"""
+
+            messages.append({"role": "user", "content": user_content})
+
+            yield {"type": "status", "data": "正在生成回答..."}
+
+            full_answer = ""
+            for token in self.ai_client.chat_completion_stream(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=4096
+            ):
+                full_answer += token
+                yield {"type": "token", "data": token}
+
+            yield {"type": "done", "data": {
+                "answer": full_answer,
+                "used_context": used_vector,
+                "context_snippet": vector_context
+            }}
+
+        except Exception as e:
+            logger.error(f"[QA服务] RAG流式回答失败: {e}")
+            yield {"type": "error", "data": str(e)}
+
+    def answer_with_llm_stream(
+        self,
+        question: str,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None
+    ) -> Generator[Dict[str, Any], None, None]:
+        yield {"type": "status", "data": "准备回答..."}
+
+        if not self.ai_client:
+            yield {"type": "error", "data": "AI服务未配置"}
+            return
+
+        try:
+            messages = []
+            system_msg = """你是一个问答助手，请仅基于你自身的知识回答用户的问题。
+
+严格限制：
+1. 不要进行网络检索、知识库检索或任何外部信息查询
+2. 你没有访问任何专业资料库的权限，只能依靠自身知识"""
+
+            messages.append({"role": "system", "content": system_msg})
+            if conversation_history:
+                messages.extend(conversation_history[-6:])
+            messages.append({"role": "user", "content": question})
+
+            yield {"type": "status", "data": "正在生成回答..."}
+
+            full_answer = ""
+            for token in self.ai_client.chat_completion_stream(
+                messages=messages,
+                temperature=0.3,
+                max_tokens=2048
+            ):
+                full_answer += token
+                yield {"type": "token", "data": token}
+
+            yield {"type": "done", "data": {
+                "answer": full_answer,
+                "used_context": False,
+                "context_snippet": None
+            }}
+
+        except Exception as e:
+            logger.error(f"[QA服务] LLM流式回答失败: {e}")
+            yield {"type": "error", "data": str(e)}
+
     def _format_stage7_context(
         self,
         claim_candidates: list,

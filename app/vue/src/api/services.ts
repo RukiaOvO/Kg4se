@@ -55,18 +55,18 @@ export interface JobStatus {
   error?: string
   stats?: {
     chunks: number
-    triplets: number
-    concepts: number
+    entities: number
+    claims: number
+    themes: number
+    relationships: number
+    execution_time?: number
     textLength?: number
   }
-  ai_mode?: boolean
-  ai_stats?: {
-    total_tokens?: number
-    prompt_tokens?: number
-    completion_tokens?: number
-    model?: string
+  quality_metrics?: {
+    isolated_node_ratio?: number
+    avg_degree?: number
   }
-  insights?: string[]
+  stage_metrics?: Record<string, any>
 }
 
 export interface AIProvider {
@@ -102,36 +102,11 @@ export const getDashboardStats = (): Promise<DashboardStats> =>
 
 // Upload - 统一使用 /uploads/process 接口，自动处理
 export const uploadFile = (
-  file: File, 
-  options?: {
-    enable_ai_segmentation?: boolean
-    userPrompt?: string
-    optimizePrompt?: boolean
-    rootTopic?: string
-  }
+  file: File
 ): Promise<UploadResponse> => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('auto_process', 'true')
-  
-  // 始终发送 enable_ai_segmentation 字段，避免后端使用默认值
-  formData.append('enable_ai_segmentation', String(options?.enable_ai_segmentation === true))
-  
-  if (options?.enable_ai_segmentation) {
-    if (options.userPrompt) {
-      formData.append('user_prompt', options.userPrompt)
-    }
-    if (options.optimizePrompt !== undefined) {
-      formData.append('optimize_prompt', String(options.optimizePrompt))
-    }
-  } else {
-    // AI 模式关闭时也发送 optimize_prompt 默认值
-    formData.append('optimize_prompt', 'true')
-  }
-  
-  if (options?.rootTopic) {
-    formData.append('root_topic', options.rootTopic)
-  }
   
   return api.post('/uploads/process', formData)
 }
@@ -139,29 +114,12 @@ export const uploadFile = (
 export const uploadText = (
   content: string, 
   title?: string, 
-  autoProcess: boolean = true,
-  options?: {
-    enable_ai_segmentation?: boolean
-    userPrompt?: string
-    optimizePrompt?: boolean
-    rootTopic?: string
-  }
+  autoProcess: boolean = true
 ): Promise<UploadResponse> => {
   const payload: any = { 
     content, 
     title, 
-    auto_process: autoProcess,
-    // 始终发送 enable_ai_segmentation 字段
-    enable_ai_segmentation: options?.enable_ai_segmentation === true,
-    optimize_prompt: options?.optimizePrompt !== undefined ? options.optimizePrompt : true
-  }
-  
-  if (options?.enable_ai_segmentation && options.userPrompt) {
-    payload.user_prompt = options.userPrompt
-  }
-  
-  if (options?.rootTopic) {
-    payload.root_topic = options.rootTopic
+    auto_process: autoProcess
   }
   
   return api.post('/uploads/text', payload)
@@ -170,29 +128,12 @@ export const uploadText = (
 export const uploadUrl = (
   url: string, 
   title?: string, 
-  autoProcess: boolean = true,
-  options?: {
-    enable_ai_segmentation?: boolean
-    userPrompt?: string
-    optimizePrompt?: boolean
-    rootTopic?: string
-  }
+  autoProcess: boolean = true
 ): Promise<UploadResponse> => {
   const payload: any = { 
     url, 
     title, 
-    auto_process: autoProcess,
-    // 始终发送 enable_ai_segmentation 字段
-    enable_ai_segmentation: options?.enable_ai_segmentation === true,
-    optimize_prompt: options?.optimizePrompt !== undefined ? options.optimizePrompt : true
-  }
-  
-  if (options?.enable_ai_segmentation && options.userPrompt) {
-    payload.user_prompt = options.userPrompt
-  }
-  
-  if (options?.rootTopic) {
-    payload.root_topic = options.rootTopic
+    auto_process: autoProcess
   }
   
   return api.post('/uploads/url', payload)
@@ -215,6 +156,7 @@ export interface DocumentListResponse {
     chunk_count: number
     concept_count: number
     claim_count: number
+    theme_count: number
     processing_status: string
   }>
   stats?: {
@@ -239,6 +181,7 @@ export interface DocumentDetail {
     concept_count: number
     claim_count: number
     relation_count: number
+    theme_count: number
   }
   themes: Array<{
     id: string
@@ -419,6 +362,67 @@ export interface AskResponse {
 
 export const askQuestion = (request: AskRequest): Promise<AskResponse> =>
   api.post('/qa/ask', request)
+
+export const askQuestionStream = (
+  request: AskRequest,
+  onToken: (token: string) => void,
+  onStatus: (status: string) => void,
+  onDone: (result: { answer: string; used_context: boolean; context_snippet?: string }) => void,
+  onError: (error: string) => void
+): AbortController => {
+  const controller = new AbortController()
+
+  fetch(`${API_BASE}/qa/ask/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+    signal: controller.signal
+  }).then(async (response) => {
+    if (!response.ok) {
+      onError(`请求失败: ${response.status}`)
+      return
+    }
+    const reader = response.body?.getReader()
+    if (!reader) {
+      onError('响应流不可用')
+      return
+    }
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data: ')) continue
+        try {
+          const event = JSON.parse(trimmed.slice(6))
+          if (event.type === 'token') {
+            onToken(event.data)
+          } else if (event.type === 'status') {
+            onStatus(event.data)
+          } else if (event.type === 'done') {
+            onDone(event.data)
+          } else if (event.type === 'error') {
+            onError(event.data)
+          }
+        } catch { /* skip malformed lines */ }
+      }
+    }
+  }).catch((err) => {
+    if (err.name !== 'AbortError') {
+      onError(err.message || '网络错误')
+    }
+  })
+
+  return controller
+}
 
 export const checkQAHealth = (): Promise<{ status: string; provider: string; has_ai_client: boolean }> =>
   api.get('/qa/health')

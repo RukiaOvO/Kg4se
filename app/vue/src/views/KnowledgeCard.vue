@@ -17,14 +17,6 @@
       <n-card>
         <n-space>
           <n-select
-            v-model:value="filterDomain"
-            :options="domainOptions"
-            :placeholder="$t('knowledge_card.filter_by_domain')"
-            clearable
-            style="width: 200px"
-            @update:value="loadCards"
-          />
-          <n-select
             v-model:value="filterCategory"
             :options="categoryOptions"
             :placeholder="$t('knowledge_card.filter_by_category')"
@@ -281,8 +273,8 @@ const loading = ref(false)
 const submitting = ref(false)
 
 // 筛选
-const filterDomain = ref<string | null>(null)
-const filterCategory = ref<string | null>(null)
+const filterCategory = ref<string>('')
+const allCategories = ref<string[]>([])
 
 // 模态框
 const showEditModal = computed({
@@ -322,20 +314,10 @@ const formRules = {
 const viewingCard = ref<any>(null)
 const editingCardId = ref<string | null>(null)
 
-// 选项
-const domainOptions = computed(() => {
-  const domains = new Set(cards.value.map(c => c.domain).filter(Boolean))
-  return [
-    { label: t('knowledge_card.all'), value: null },
-    ...Array.from(domains).map(d => ({ label: d, value: d }))
-  ]
-})
-
 const categoryOptions = computed(() => {
-  const categories = new Set(cards.value.map(c => c.category).filter(Boolean))
   return [
-    { label: t('knowledge_card.all'), value: null },
-    ...Array.from(categories).map(c => ({ label: c, value: c }))
+    { label: t('knowledge_card.all'), value: '' },
+    ...allCategories.value.map(c => ({ label: c, value: c }))
   ]
 })
 
@@ -344,13 +326,20 @@ const loadCards = async () => {
   loading.value = true
   try {
     const params: any = { limit: 100 }
-    if (filterDomain.value) params.domain = filterDomain.value
     if (filterCategory.value) params.category = filterCategory.value
 
     const response = await api.get('/knowledge-cards', { params })
     const resData: any = response.data || response
     cards.value = resData.cards || []
     total.value = resData.total || 0
+
+    if (!filterCategory.value && allCategories.value.length === 0) {
+      const categories = new Set<string>()
+      cards.value.forEach(c => {
+        if (c.category) categories.add(c.category)
+      })
+      allCategories.value = Array.from(categories).sort()
+    }
   } catch (error: any) {
     message.error(error.response?.data?.detail || t('knowledge_card.load_failed'))
   } finally {

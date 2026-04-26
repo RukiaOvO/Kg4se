@@ -213,11 +213,11 @@ class DomainFilter:
         source_entity: str,
         target_entity: str,
         relationship_type: str,
-        source_type: str = "KnowledgePoint",
-        target_type: str = "KnowledgePoint"
+        source_type: str = "Concept",
+        target_type: str = "Concept"
     ) -> Tuple[bool, float]:
         """
-        判断关系是否有效（仅允许5种关系）
+        判断关系是否有效
         
         Args:
             source_entity: 源实体名称
@@ -229,26 +229,34 @@ class DomainFilter:
         Returns:
             (是否有效, 置信度)
         """
-        # 1. 检查关系类型是否允许
         allowed_relationships = {
-            "BELONGS_TO",    # KnowledgePoint -> KnowledgePoint
-            "FROM",          # KnowledgePoint -> Document
-            "PRACTICES_IS",  # Question -> KnowledgePoint
-            "HAS_TIMESTAMP", # Document -> Timestamp
-            "IS"             # KnowledgePoint -> Content
+            "MENTIONS",
+            "CONTAINS_CLAIM",
+            "BELONGS_TO_THEME",
+            "RELATED_TO",
+            "SUPPORTS",
+            "CONTRADICTS",
+            "EVIDENCE_FROM",
+            "CONTAINS",
+            "BELONGS_TO",
+            "RELATION",
         }
         
         if relationship_type not in allowed_relationships:
             logger.debug(f"关系类型 '{relationship_type}' 不在允许列表中")
             return False, 0.0
         
-        # 2. 检查类型约束
         type_constraints = {
-            "BELONGS_TO": (["KnowledgePoint"], ["KnowledgePoint"]),
-            "FROM": (["KnowledgePoint"], ["Document"]),
-            "PRACTICES_IS": (["Question"], ["KnowledgePoint"]),
-            "HAS_TIMESTAMP": (["Document"], ["Timestamp"]),
-            "IS": (["KnowledgePoint"], ["Content"])
+            "MENTIONS": (["Chunk", "Document"], ["Concept", "Claim"]),
+            "CONTAINS_CLAIM": (["Chunk"], ["Claim"]),
+            "BELONGS_TO_THEME": (["Concept"], ["Theme"]),
+            "RELATED_TO": (["Concept", "Claim", "Document"], ["Concept", "Claim", "Document"]),
+            "SUPPORTS": (["Claim"], ["Concept", "Claim"]),
+            "CONTRADICTS": (["Claim"], ["Concept", "Claim"]),
+            "EVIDENCE_FROM": (["Concept", "Claim"], ["Chunk"]),
+            "CONTAINS": (["Document"], ["Chunk"]),
+            "BELONGS_TO": (["Concept", "Document"], ["Concept", "Document", "Theme"]),
+            "RELATION": (["Concept", "Claim", "Document", "Chunk"], ["Concept", "Claim", "Document", "Chunk"]),
         }
         
         if relationship_type in type_constraints:
@@ -260,13 +268,12 @@ class DomainFilter:
                 )
                 return False, 0.0
         
-        # 3. 检查实体本身是否相关（针对非Timestamp/Document实体）
-        if source_type in ["KnowledgePoint", "Question"]:
+        if source_type in ["Concept", "Claim"]:
             is_valid, conf = self.is_software_engineering_entity(source_entity, source_type)
             if not is_valid and conf < 0.2:
                 return False, 0.0
         
-        if target_type in ["KnowledgePoint", "Content", "Question"]:
+        if target_type in ["Concept", "Claim"]:
             is_valid, conf = self.is_software_engineering_entity(target_entity, target_type)
             if not is_valid and conf < 0.2:
                 return False, 0.0
@@ -287,14 +294,12 @@ class DomainFilter:
         
         for entity in entities:
             entity_name = entity.get("name", "")
-            entity_type = entity.get("type", "KnowledgePoint")
+            entity_type = entity.get("type", "Concept")
             
-            # 对于Document, Timestamp, Content等类型，不进行过滤
-            if entity_type in ["Document", "Timestamp", "Content"]:
+            if entity_type in ["Document", "Chunk", "Theme"]:
                 filtered.append(entity)
                 continue
             
-            # 对于KnowledgePoint, Question等，进行领域检查
             is_valid, confidence = self.is_software_engineering_entity(entity_name, entity_type)
             
             if is_valid:
@@ -313,7 +318,7 @@ class DomainFilter:
         entities: Dict[str, Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        过滤关系列表，仅保留允许的5种关系
+        过滤关系列表，仅保留允许的关系
         
         Args:
             relationships: 关系列表
@@ -333,9 +338,9 @@ class DomainFilter:
             target_entity = entities.get(target_id, {})
             
             source_name = source_entity.get("name", "")
-            source_type = source_entity.get("type", "KnowledgePoint")
+            source_type = source_entity.get("type", "Concept")
             target_name = target_entity.get("name", "")
-            target_type = target_entity.get("type", "KnowledgePoint")
+            target_type = target_entity.get("type", "Concept")
             
             is_valid, confidence = self.is_valid_relationship(
                 source_entity=source_name,

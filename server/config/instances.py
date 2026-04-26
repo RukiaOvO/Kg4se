@@ -291,9 +291,6 @@ class InstanceNames:
     QUERY_SERVICE = "query_service"
     CONFIG_SERVICE = "config_service"
     STORAGE = "storage"
-    TRIPLET_EXTRACTOR = "triplet_extractor"
-    ENTITY_LINKER = "entity_linker"
-    AI_SEGMENTER = "ai_segmenter"
 
 
 # ============================================
@@ -333,15 +330,6 @@ def initialize_instances():
     
     # 存储服务（使用工厂模式延迟初始化）
     register_factory(InstanceNames.STORAGE, _create_storage)
-    
-    # 三元组提取器（使用工厂模式延迟初始化）
-    register_factory(InstanceNames.TRIPLET_EXTRACTOR, _create_triplet_extractor)
-    
-    # 实体链接器（使用工厂模式延迟初始化）
-    register_factory(InstanceNames.ENTITY_LINKER, _create_entity_linker)
-    
-    # AI分词器（使用工厂模式延迟初始化）
-    register_factory(InstanceNames.AI_SEGMENTER, _create_ai_segmenter)
     
     logger.info(f"Registered {instance_registry.get_count()} factories (delayed initialization)")
 
@@ -394,21 +382,3 @@ def _create_storage():
     """创建存储服务实例"""
     from infra.storage import Storage
     return Storage()
-
-
-def _create_triplet_extractor():
-    """创建三元组提取器实例"""
-    from services.extractor import TripletExtractor
-    return TripletExtractor()
-
-
-def _create_entity_linker():
-    """创建实体链接器实例"""
-    from services.linker import EntityLinker
-    return EntityLinker()
-
-
-def _create_ai_segmenter():
-    """创建 AI 分词器实例"""
-    from services.ai_segmenter import AISegmenter
-    return AISegmenter()

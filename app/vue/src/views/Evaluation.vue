@@ -146,15 +146,7 @@
                           </div>
                           <div class="formula-total">
                             <span class="ft-label">自动评估总分 A</span>
-                            <div class="ft-value"><code>A = 0.30&times;Sem + 0.15&times;Len + 0.10&times;WOR + 0.25&times;KF1 + 0.20&times;RL</code></div>
-                          </div>
-                          <div class="weight-rationale">
-                            <span class="wr-label">权重设计依据</span>
-                            <div class="wr-item">Sem(0.30): 语义匹配是最直接的质量指标</div>
-                            <div class="wr-item">KF1(0.25): 事实覆盖需兼顾精确率和召回率</div>
-                            <div class="wr-item">RL(0.20): 语序匹配补充语义和词汇评估</div>
-                            <div class="wr-item">Len(0.15): 充分度仅作基础校验</div>
-                            <div class="wr-item">WOR(0.10): 与RL和KF1部分冗余，权重最低</div>
+                            <div class="ft-value"><code>A = 0.30&times;Sem + 0.30&times;Len + 0.10&times;WOR + 0.15&times;KF1 + 0.15&times;RL</code></div>
                           </div>
                           <div class="tab-score-section">
                             <div class="tss-header">各方法分数 A</div>
@@ -970,31 +962,6 @@ const scoreScaleList = [
         color: #999;
         white-space: nowrap;
       }
-    }
-  }
-
-  .weight-rationale {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    padding: 10px 14px;
-    margin-top: 10px;
-    background: linear-gradient(135deg, #fffbe6, #fff9e6);
-    border-radius: 8px;
-    border-left: 3px solid #d4af37;
-
-    .wr-label {
-      font-size: 12px;
-      font-weight: 600;
-      color: #666;
-      margin-bottom: 2px;
-    }
-
-    .wr-item {
-      font-size: 11px;
-      color: #777;
-      line-height: 1.5;
-      padding-left: 4px;
     }
   }
 

@@ -126,9 +126,9 @@ class PointwiseEvaluator:
         
         权重设计依据:
         - Sem=0.30: 语义匹配是最直接的质量指标
-        - KF1=0.25: 事实覆盖需同时考虑精确率和召回率
-        - RL=0.20: 语序匹配补充语义和词汇评估
-        - Len=0.15: 充分度仅作基础校验
+        - Len=0.30: 长度充分度反映答案的完整覆盖程度
+        - KF1=0.15: 关键词F1作为语义的补充参考
+        - RL=0.15: ROUGE-L语序匹配作为辅助指标
         - WOR=0.10: 与RL和KF1部分冗余，权重最低
         """
         sem = self._semantic_similarity(predicted, expected)
@@ -144,7 +144,7 @@ class PointwiseEvaluator:
             "keyword_f1": round(keyword_f1, 4),
             "rouge_l": round(rouge_l, 4),
             "score": round(
-                sem * 0.30 + length * 0.15 + word_overlap * 0.10 + keyword_f1 * 0.25 + rouge_l * 0.20,
+                sem * 0.30 + length * 0.30 + word_overlap * 0.10 + keyword_f1 * 0.15 + rouge_l * 0.15,
                 4
             )
         }

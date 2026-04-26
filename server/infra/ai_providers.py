@@ -1,5 +1,5 @@
 """AI Provider configuration and unified interface."""
-from typing import Optional, Literal, List, Dict, Any
+from typing import Optional, Literal, List, Dict, Any, Generator
 from openai import OpenAI
 import anthropic
 import json
@@ -52,6 +52,25 @@ class BaseAIClient:
             
         Returns:
             Response text content
+        """
+        raise NotImplementedError
+
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        **extra_params
+    ) -> Generator[str, None, None]:
+        """
+        Stream chat completion response token by token.
+        
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            temperature: Sampling temperature
+            extra_params: Additional provider-specific parameters
+            
+        Yields:
+            Text tokens/chunks as they arrive
         """
         raise NotImplementedError
 
@@ -109,6 +128,27 @@ class GrokClient(BaseAIClient):
                 ) from e
             raise
 
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        **extra_params
+    ) -> Generator[str, None, None]:
+        params = {k: v for k, v in extra_params.items() if k != "json_mode"}
+        if extra_params.get("json_mode"):
+            params["response_format"] = {"type": "json_object"}
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            stream=True,
+            **params
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content
+
 
 class OpenAIClient(BaseAIClient):
     """OpenAI GPT client."""
@@ -135,6 +175,25 @@ class OpenAIClient(BaseAIClient):
             **{k: v for k, v in extra_params.items() if k != "json_mode"}
         )
         return response.choices[0].message.content
+
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        **extra_params
+    ) -> Generator[str, None, None]:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            stream=True,
+            response_format={"type": "json_object"} if extra_params.get("json_mode") else None,
+            **{k: v for k, v in extra_params.items() if k != "json_mode"}
+        )
+        for chunk in response:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content
 
 
 class AnthropicClient(BaseAIClient):
@@ -187,6 +246,40 @@ class AnthropicClient(BaseAIClient):
         response = self.client.messages.create(**kwargs)
         return response.content[0].text
 
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        **extra_params
+    ) -> Generator[str, None, None]:
+        system_msg = None
+        user_messages = []
+        for msg in messages:
+            if msg["role"] == "system":
+                system_msg = msg["content"]
+            else:
+                user_messages.append(msg)
+        if extra_params.get("json_mode"):
+            json_instruction = "\n\n重要：请确保返回的内容是有效的 JSON 格式，不要包含任何额外的文本或说明。"
+            if system_msg:
+                system_msg = system_msg + json_instruction
+            else:
+                system_msg = json_instruction.strip()
+        kwargs = {
+            "model": self.model,
+            "messages": user_messages,
+            "temperature": temperature,
+            "max_tokens": extra_params.get("max_tokens", 4096),
+            "stream": True
+        }
+        kwargs = {k: v for k, v in kwargs.items() if k != "json_mode"}
+        if system_msg:
+            kwargs["system"] = system_msg
+        with self.client.messages.create(**kwargs) as stream:
+            for event in stream:
+                if event.type == "content_block_delta" and event.delta.text:
+                    yield event.delta.text
+
 
 class GoogleGeminiClient(BaseAIClient):
     """Google Gemini client (via OpenAI-compatible API)."""
@@ -218,6 +311,27 @@ class GoogleGeminiClient(BaseAIClient):
             **params
         )
         return response.choices[0].message.content
+
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        **extra_params
+    ) -> Generator[str, None, None]:
+        params = {k: v for k, v in extra_params.items() if k != "json_mode"}
+        if extra_params.get("json_mode"):
+            params["response_format"] = {"type": "json_object"}
+        stream = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            stream=True,
+            **params
+        )
+        for chunk in stream:
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta and delta.content:
+                yield delta.content
 
 
 class OpenAICompatibleClient(BaseAIClient):
@@ -323,6 +437,37 @@ class OpenAICompatibleClient(BaseAIClient):
                 ) from e
             raise
 
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        **extra_params
+    ) -> Generator[str, None, None]:
+        import time
+        params = {k: v for k, v in extra_params.items() if k != "json_mode"}
+        if extra_params.get("json_mode"):
+            params["response_format"] = {"type": "json_object"}
+        start_time = time.time()
+        logger.info(f"📡 LLM Stream Request - Model: {self.model}")
+        try:
+            stream = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature,
+                stream=True,
+                **params
+            )
+            for chunk in stream:
+                delta = chunk.choices[0].delta if chunk.choices else None
+                if delta and delta.content:
+                    yield delta.content
+            elapsed_time = time.time() - start_time
+            logger.info(f"✅ LLM Stream Complete - Time: {elapsed_time:.2f}s")
+        except Exception as e:
+            elapsed_time = time.time() - start_time
+            logger.error(f"❌ LLM Stream Error - Time: {elapsed_time:.2f}s, Error: {type(e).__name__}: {e}")
+            raise
+
 
 class MockClient(BaseAIClient):
     """Mock client for testing."""
@@ -391,6 +536,19 @@ class MockClient(BaseAIClient):
                 }
             ]
         }, ensure_ascii=False)
+
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        **extra_params
+    ) -> Generator[str, None, None]:
+        import time
+        result = self.chat_completion(messages, temperature, **extra_params)
+        words = result.split("。")
+        for i, sentence in enumerate(words):
+            yield sentence + ("。" if i < len(words) - 1 else "")
+            time.sleep(0.05)
 
 
 class AIProviderFactory:
@@ -657,6 +815,19 @@ class MockAIClient(BaseAIClient):
 您的问题是: {user_message[:100]}
 
 在实际应用中，这里会返回由AI模型生成的真实答案，同时配合知识图谱中的相关信息。"""
+
+    def chat_completion_stream(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.3,
+        **extra_params
+    ) -> Generator[str, None, None]:
+        import time
+        result = self.chat_completion(messages, temperature, **extra_params)
+        words = result.split("。")
+        for i, sentence in enumerate(words):
+            yield sentence + ("。" if i < len(words) - 1 else "")
+            time.sleep(0.05)
 
 
 # ============================================

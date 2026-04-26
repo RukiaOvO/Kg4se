@@ -145,9 +145,10 @@ export interface ProcessingJob {
   completedAt?: string
   stats?: {
     chunks: number
-    triplets: number
-    concepts: number
-    relations: number
+    entities: number
+    claims: number
+    themes: number
+    relationships: number
   }
 }
 

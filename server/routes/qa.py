@@ -1,6 +1,8 @@
 """Q&A API routes for intelligent question answering."""
-from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query
+import json
+from typing import Optional, List, Dict, Any, AsyncGenerator
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from services.qa_service import qa_service
 from services.config_service import config_service
@@ -117,6 +119,64 @@ async def ask_question(request: AskRequest) -> AskResponse:
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+@router.post("/ask/stream")
+async def ask_question_stream(request: AskRequest):
+    """
+    Ask a question with streaming response.
+    
+    Uses SSE (Server-Sent Events) to stream the AI response token by token.
+    """
+    try:
+        if not request.question or not request.question.strip():
+            raise HTTPException(status_code=400, detail="Question cannot be empty")
+        
+        history = None
+        if request.conversation_history:
+            history = [
+                {"role": msg.role, "content": msg.content}
+                for msg in request.conversation_history
+            ]
+        
+        async def event_generator():
+            mode = request.mode.lower()
+            if mode == "rag":
+                stream_gen = qa_service.answer_with_rag_stream(
+                    question=request.question,
+                    conversation_history=history,
+                    session_id=request.session_id
+                )
+            elif mode == "llm":
+                stream_gen = qa_service.answer_with_llm_stream(
+                    question=request.question,
+                    conversation_history=history,
+                    session_id=request.session_id
+                )
+            else:
+                stream_gen = qa_service.answer_with_graphrag_stream(
+                    question=request.question,
+                    conversation_history=history,
+                    session_id=request.session_id
+                )
+            for event in stream_gen:
+                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+        
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [API] 流式问答请求失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/history", response_model=Dict[str, Any])
