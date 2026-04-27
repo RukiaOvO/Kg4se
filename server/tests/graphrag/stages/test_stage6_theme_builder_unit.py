@@ -1,7 +1,7 @@
-import json
+﻿import json
 import pytest
 
-from graphrag.stages import stage4_theme_builder as s4
+from graphrag.stages import stage6_theme_builder as s6
 from graphrag.models.theme import Theme
 
 
@@ -24,15 +24,15 @@ def _install_theme_mocks(monkeypatch, payload: str):
     def _create_mock_client(provider, api_key=None, model=None, base_url=None):
         return dummy_client
 
-    monkeypatch.setattr(s4, "config_service", _ConfigService, raising=True)
-    monkeypatch.setattr(s4.AIProviderFactory, "create_client", _create_mock_client, raising=True)
+    monkeypatch.setattr(s6, "config_service", _ConfigService, raising=True)
+    monkeypatch.setattr(s6.AIProviderFactory, "create_client", _create_mock_client, raising=True)
 
 
 def test_theme_builder_success(monkeypatch):
     payload = json.dumps({"themes": []})
 
     _install_theme_mocks(monkeypatch, payload)
-    builder = s4.ThemeBuilder()
+    builder = s6.ThemeBuilder()
     builder.thresholds["multi_scale"] = {"enabled": False}
     builder.thresholds["min_community_size"] = 1
 
@@ -85,7 +85,7 @@ def test_theme_builder_success(monkeypatch):
 def test_theme_builder_empty_communities(monkeypatch):
     payload = "{}"
     _install_theme_mocks(monkeypatch, payload)
-    builder = s4.ThemeBuilder()
+    builder = s6.ThemeBuilder()
     builder.thresholds["multi_scale"] = {"enabled": False}
     builder.thresholds["min_community_size"] = 1
 

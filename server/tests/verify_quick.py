@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 快速验证脚本 - 无需依赖
 Quick Verification Script - No Dependencies Required
@@ -101,21 +101,21 @@ def verify_all():
         
         checks.append(("stage2", has_import and has_init and has_check))
     
-    stage5_path = Path("../graphrag/stages/stage5_predicate_governor.py")
+    stage5_path = Path("../graphrag/stages/stage4_predicate_governor.py")
     if stage5_path.exists():
         content = stage5_path.read_text(encoding='utf-8')
         has_allowed = "ALLOWED_PREDICATES" in content
         has_5_predicates = all(p in content for p in ["BELONGS_TO", "FROM", "PRACTICES_IS", "HAS_TIMESTAMP", "IS"])
         has_normalize = "def normalize" in content
         
-        print(f"\n  stage5_predicate_governor.py:")
+        print(f"\n  stage4_predicate_governor.py:")
         print(f"    {'✅' if has_allowed else '❌'} ALLOWED_PREDICATES 白名单")
         print(f"    {'✅' if has_5_predicates else '❌'} 5 种标准谓词定义")
         print(f"    {'✅' if has_normalize else '❌'} normalize() 方法重写")
         
         checks.append(("stage5", has_allowed and has_5_predicates and has_normalize))
     
-    stage6_path = Path("../graphrag/stages/stage6_graph_service.py")
+    stage6_path = Path("../graphrag/stages/stage5_graph_service.py")
     if stage6_path.exists():
         content = stage6_path.read_text(encoding='utf-8')
         has_entity_types = "ALLOWED_ENTITY_TYPES" in content
@@ -123,7 +123,7 @@ def verify_all():
         has_store_entity = "def store_entity" in content
         has_store_rel = "def store_relationship" in content
         
-        print(f"\n  stage6_graph_service.py:")
+        print(f"\n  stage5_graph_service.py:")
         print(f"    {'✅' if has_entity_types else '❌'} ALLOWED_ENTITY_TYPES 白名单")
         print(f"    {'✅' if has_rel_types else '❌'} ALLOWED_RELATIONSHIP_TYPES 白名单")
         print(f"    {'✅' if has_store_entity else '❌'} store_entity() 方法")
@@ -160,8 +160,8 @@ def verify_all():
         "config/predicates.yaml",
         "utils/domain_filter.py",
         "prompts/stages/stage2_entity_linker.py",
-        "prompts/stages/stage5_predicate_governor.py",
-        "prompts/stages/stage6_graph_service.py",
+        "prompts/stages/stage4_predicate_governor.py",
+        "prompts/stages/stage5_graph_service.py",
         "prompts/claim_extraction.txt",
     ]
     

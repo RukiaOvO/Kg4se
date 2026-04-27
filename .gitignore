@@ -42,7 +42,7 @@ wheels/
 # Data and uploads
 data/
 uploads/
-llamaindex/
+thesis/
 pdf/
 *.db
 *.sqlite

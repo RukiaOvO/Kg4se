@@ -185,7 +185,7 @@ const message = useMessage()
 const processingStore = useProcessingStore()
 
 const pipelineStages = [
-  '分块', '消解', '实体', '论断', '主题', '治理', '存储', '度量'
+  '分块', '消解', '实体', '论断', '治理', '存储', '主题', '度量'
 ]
 
 const pipelineStageKeywords: Record<number, string[]> = {
@@ -193,10 +193,10 @@ const pipelineStageKeywords: Record<number, string[]> = {
   1: ['消解', 'coref', 'stage 1', '阶段 1'],
   2: ['实体', 'entity', 'link', 'stage 2', '阶段 2'],
   3: ['论断', 'claim', 'extract', 'stage 3', '阶段 3'],
-  4: ['主题', 'theme', 'stage 4', '阶段 4'],
-  5: ['谓词', 'govern', 'predicate', 'stage 5', '阶段 5'],
-  6: ['存储', 'graph', 'store', 'stage 6', '阶段 6'],
-  7: ['度量', 'metric', 'quality', 'stage 8', '阶段 8']
+  4: ['谓词', 'govern', 'predicate', 'stage 4', '阶段 4'],
+  5: ['存储', 'graph', 'store', 'stage 5', '阶段 5'],
+  6: ['主题', 'theme', 'stage 6', '阶段 6'],
+  7: ['度量', 'metric', 'quality', 'stage 7', '阶段 7']
 }
 
 const getStageIndex = (task: any): number => {

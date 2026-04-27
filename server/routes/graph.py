@@ -28,7 +28,7 @@ def _clean_properties(props: Dict[str, Any]) -> Dict[str, Any]:
 
 @router.get("/visualize")
 async def visualize_graph(
-    limit: int = Query(500, ge=10, le=10000, description="Maximum nodes to return"),
+    limit: int = Query(500, ge=10, le=50000, description="Maximum nodes to return"),
     edge_limit: int = Query(1000, ge=10, le=50000, description="Maximum edges to return"),
     node_type: Optional[str] = Query(None, description="Filter by node type (Concept, Document, etc)"),
 ):
@@ -37,9 +37,16 @@ async def visualize_graph(
     
     Returns nodes and edges in a format suitable for frontend visualization libraries.
     Automatically handles Neo4j type conversions (DateTime, Node objects, etc).
+    
+    Node priority: Document > Chunk > Entity > Concept > Claim > Other
     """
     try:
-        # First, get the specified number of unique nodes
+        skeleton_count = 0
+        if not node_type:
+            skeleton_query = "MATCH (n) WHERE n:Document OR n:Chunk RETURN count(n) AS cnt"
+            skeleton_result = neo4j_client.execute_query(skeleton_query)
+            skeleton_count = skeleton_result[0]["cnt"] if skeleton_result and len(skeleton_result) > 0 else 0
+
         if node_type:
             node_query = f"""
             MATCH (n:{node_type})
@@ -51,7 +58,14 @@ async def visualize_graph(
             node_query = f"""
             MATCH (n)
             RETURN n
-            ORDER BY CASE WHEN 'Document' IN labels(n) THEN 0 ELSE 1 END
+            ORDER BY CASE 
+              WHEN 'Document' IN labels(n) THEN 0 
+              WHEN 'Chunk' IN labels(n) THEN 1 
+              WHEN 'Entity' IN labels(n) THEN 2
+              WHEN 'Concept' IN labels(n) THEN 3
+              WHEN 'Claim' IN labels(n) THEN 4
+              ELSE 5
+            END
             LIMIT {limit}
             """
         
@@ -67,19 +81,23 @@ async def visualize_graph(
                 node = record["n"]
                 node_props = dict(node) if isinstance(node, dict) else node
                 node_props = neo4j_client._convert_neo4j_types(node_props)
-                labels = list(node.labels) if hasattr(node, "labels") else []
-                
+
+                labels = node_props.pop('_labels', None) or []
+                if isinstance(labels, str):
+                    labels = [labels]
+
+                if not labels and hasattr(node, "labels"):
+                    labels = list(node.labels)
+
                 if not labels:
-                    # GraphRAG pipeline 创建的新类型
                     if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
                         labels = ["Document"]
-                    elif node_props.get("type") == "chunk" or (node_props.get("chunk_id") is not None):
+                    elif node_props.get("type") == "chunk" or node_props.get("chunk_id") is not None or node_props.get("chunk_index") is not None:
                         labels = ["Chunk"]
                     elif node_props.get("type") == "concept":
                         labels = ["Concept"]
                     elif node_props.get("type") == "entity":
                         labels = ["Entity"]
-                    # GraphRAG 新增类型
                     elif node_props.get("summary") and node_props.get("keywords"):
                         labels = ["Theme"]
                     elif node_props.get("text") and node_props.get("confidence") is not None:
@@ -103,7 +121,7 @@ async def visualize_graph(
                     "id": node_id,
                     "labels": labels,
                     "type": labels[0] if labels else "Unknown",
-                    "label": node_props.get("label") or node_props.get("name") or node_props.get("filename") or (node_props.get("summary", "")[:30] if node_props.get("summary") else node_id),
+                    "label": node_props.get("label") or node_props.get("name") or node_props.get("filename") or (f"Chunk #{node_props['chunk_index']}" if node_props.get("chunk_index") is not None else None) or (node_props.get("summary", "")[:30] if node_props.get("summary") else node_id),
                     "properties": node_props,
                     "degree": 0
                 }
@@ -185,6 +203,7 @@ async def visualize_graph(
             "stats": {
                 "node_count": len(nodes),
                 "edge_count": len(edges),
+                "skeleton_count": skeleton_count,
                 "types": list(set(n.get("type", "Unknown") for n in nodes))
             }
         }
@@ -402,7 +421,7 @@ async def get_edges(
 async def get_document_graph(
     document_id: str,
     depth: int = Query(2, ge=1, le=5, description="Relationship depth"),
-    limit: int = Query(500, ge=10, le=10000, description="Maximum nodes to return"),
+    limit: int = Query(500, ge=10, le=50000, description="Maximum nodes to return"),
     edge_limit: int = Query(1000, ge=10, le=50000, description="Maximum edges to return")
 ):
     """
@@ -426,18 +445,34 @@ async def get_document_graph(
     if not doc_check:
         raise HTTPException(status_code=404, detail="Document not found")
     
+    skeleton_count = 1
+    skeleton_chunk_query = f"""
+    MATCH (d:Document {{id: $doc_id}})-[*1..{depth}]-(c:Chunk)
+    RETURN count(DISTINCT c) AS cnt
+    """
+    skeleton_chunk_result = neo4j_client.execute_query(skeleton_chunk_query, {"doc_id": document_id})
+    chunk_cnt = skeleton_chunk_result[0]["cnt"] if skeleton_chunk_result and len(skeleton_chunk_result) > 0 else 0
+    skeleton_count += chunk_cnt
+    
     # 获取文档节点及其关联节点（排除其他Document节点）
+    # 将文档节点和关联节点合并到同一列表，避免 UNION ALL 导致 LIMIT 失效
     node_query = f"""
     MATCH (d:Document {{id: $doc_id}})
     OPTIONAL MATCH (d)-[*1..{depth}]-(n)
     WHERE NOT (n:Document) OR n.id = $doc_id
     WITH d, COLLECT(DISTINCT n) AS related_nodes
-    UNWIND related_nodes AS rn
-    RETURN rn AS n
-    UNION ALL
-    MATCH (d:Document {{id: $doc_id}})
-    RETURN d AS n
-    ORDER BY CASE WHEN n.id = $doc_id THEN 0 ELSE 1 END
+    WITH [d] + related_nodes AS all_nodes
+    UNWIND all_nodes AS node
+    WITH DISTINCT node
+    RETURN node AS n
+    ORDER BY CASE 
+      WHEN 'Document' IN labels(node) THEN 0 
+      WHEN 'Chunk' IN labels(node) THEN 1 
+      WHEN 'Entity' IN labels(node) THEN 2
+      WHEN 'Concept' IN labels(node) THEN 3
+      WHEN 'Claim' IN labels(node) THEN 4
+      ELSE 5
+    END
     LIMIT {limit}
     """
     
@@ -466,16 +501,14 @@ async def get_document_graph(
             
             # 如果仍然没有labels，通过属性推断类型
             if not labels:
-                # GraphRAG pipeline 创建的新类型
                 if node_props.get("filename") or node_props.get("kind") in ["pdf", "docx", "md"]:
                     labels = ["Document"]
-                elif node_props.get("type") == "chunk" or (node_props.get("chunk_id") is not None):
+                elif node_props.get("type") == "chunk" or node_props.get("chunk_id") is not None or node_props.get("chunk_index") is not None:
                     labels = ["Chunk"]
                 elif node_props.get("type") == "concept":
                     labels = ["Concept"]
                 elif node_props.get("type") == "entity":
                     labels = ["Entity"]
-                # GraphRAG 新增类型
                 elif node_props.get("summary") and node_props.get("keywords"):
                     labels = ["Theme"]
                 elif node_props.get("text") and node_props.get("confidence") is not None:
@@ -499,7 +532,7 @@ async def get_document_graph(
                 "id": node_id,
                 "labels": labels,
                 "type": labels[0] if labels else "Unknown",
-                "label": node_props.get("name") or node_props.get("filename") or node_id,
+                "label": node_props.get("label") or node_props.get("name") or node_props.get("filename") or (f"Chunk #{node_props['chunk_index']}" if node_props.get("chunk_index") is not None else None) or node_id,
                 "properties": node_props,
                 "degree": 0
             }
@@ -535,14 +568,12 @@ async def get_document_graph(
                 
                 if source_node and target_node:
                     source_props = dict(source_node) if isinstance(source_node, dict) else source_node
-                    source_props = neo4j_client._convert_neo4j_types(source_props)
                     source_id = source_props.get("id") or source_props.get("name")
                     if not source_id:
                         source_id = getattr(source_node, "element_id", None) or str(id(source_node))
                     source_id = str(source_id)
                     
                     target_props = dict(target_node) if isinstance(target_node, dict) else target_node
-                    target_props = neo4j_client._convert_neo4j_types(target_props)
                     target_id = target_props.get("id") or target_props.get("name")
                     if not target_id:
                         target_id = getattr(target_node, "element_id", None) or str(id(target_node))
@@ -599,7 +630,12 @@ async def get_document_graph(
     return {
         "nodes": response_nodes,
         "edges": response_edges,
-        "stats": {"count": len(response_nodes), "edges": len(response_edges)}
+        "stats": {
+            "node_count": len(response_nodes),
+            "edge_count": len(response_edges),
+            "skeleton_count": skeleton_count,
+            "types": list(set(n.get("type", "Unknown") for n in response_nodes))
+        }
     }
 
 
@@ -763,6 +799,21 @@ async def get_graph_stats():
         concepts_result = neo4j_client.execute_query(concepts_query)
         total_concepts = concepts_result[0]["totalConcepts"] if concepts_result and len(concepts_result) > 0 else 0
 
+        # 单独查询文本块总数
+        chunks_query = "MATCH (c:Chunk) RETURN count(c) as totalChunks"
+        chunks_result = neo4j_client.execute_query(chunks_query)
+        total_chunks = chunks_result[0]["totalChunks"] if chunks_result and len(chunks_result) > 0 else 0
+
+        # 单独查询实体总数
+        entities_query = "MATCH (e:Entity) RETURN count(e) as totalEntities"
+        entities_result = neo4j_client.execute_query(entities_query)
+        total_entities = entities_result[0]["totalEntities"] if entities_result and len(entities_result) > 0 else 0
+
+        # 单独查询论断总数
+        claims_query = "MATCH (c:Claim) RETURN count(c) as totalClaims"
+        claims_result = neo4j_client.execute_query(claims_query)
+        total_claims = claims_result[0]["totalClaims"] if claims_result and len(claims_result) > 0 else 0
+
         # 单独查询关系总数
         relations_query = "MATCH ()-[r]->() RETURN count(r) as totalRelations"
         relations_result = neo4j_client.execute_query(relations_query)
@@ -840,7 +891,7 @@ async def get_graph_stats():
         try:
             community_query = """
             MATCH (t:Theme)
-            RETURN count(DISTINCT t.community_id) as communityCount
+            RETURN count(t) as communityCount
             """
             community_result = neo4j_client.execute_query(community_query)
             community_count = community_result[0]["communityCount"] if community_result and len(community_result) > 0 else 0
@@ -851,7 +902,11 @@ async def get_graph_stats():
         result = {
             "totalDocuments": int(total_docs),
             "totalConcepts": int(total_concepts),
+            "totalChunks": int(total_chunks),
+            "totalEntities": int(total_entities),
+            "totalClaims": int(total_claims),
             "totalRelations": int(total_relations),
+            "skeletonNodeCount": int(total_docs) + int(total_chunks),
             "communityCount": community_count,
             "recentDocuments": recent_docs,
             "topConcepts": top_concepts,
@@ -866,7 +921,11 @@ async def get_graph_stats():
         return {
             "totalDocuments": 0,
             "totalConcepts": 0,
+            "totalChunks": 0,
+            "totalEntities": 0,
+            "totalClaims": 0,
             "totalRelations": 0,
+            "skeletonNodeCount": 0,
             "communityCount": 0,
             "recentDocuments": [],
             "topConcepts": [],

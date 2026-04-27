@@ -39,29 +39,29 @@ GraphRAG (Graph Retrieval-Augmented Generation) 是 Kg4se 项目的核心知识�
          │   知识三元组提取      │
          └──────────┬────────────┘
                     │
-         ┌──────────▼───────────┐
-         │ Stage 4: Theme Build │  主题构建
-         │   社区聚类与总结     │
-         └──────────┬───────────┘
-                    │
          ┌──────────▼────────────┐
-         │ Stage 5: Predicate    │  谓词治理
+         │ Stage 4: Predicate    │  谓词治理
          │   关系规范化          │
          └──────────┬────────────┘
                     │
          ┌──────────▼────────────┐
-         │ Stage 6: Graph Service│  图谱存储
+         │ Stage 5: Graph Service│  图谱存储
          │   幂等落库            │
          └──────────┬────────────┘
                     │
+         ┌──────────▼───────────┐
+         │ Stage 6: Theme Build │  主题构建
+         │   社区聚类与总结     │
+         └──────────┬───────────┘
+                    │
          ┌──────────▼────────────┐
-         │ Stage 7: Query Service│  智能检索
-         │   GraphRAG 查询       │
+         │ Stage 7: Metrics      │  质量评估
+         │   知识图谱指标        │
          └──────────┬────────────┘
                     │
          ┌──────────▼────────────┐
-         │ Stage 8: Metrics      │  质量评估
-         │   知识图谱指标        │
+         │ Stage 8: Query Service│  智能检索
+         │   GraphRAG 查询       │
          └───────────────────────┘
                     │
          ┌──────────▼──────────┐
@@ -108,7 +108,7 @@ GraphRAG (Graph Retrieval-Augmented Generation) 是 Kg4se 项目的核心知识�
 - 社区摘要
 - 层次结构
 
-## 🔄 8 阶段流水线
+## 🔄 9 阶段流水线
 
 ### 流水线概览
 
@@ -118,10 +118,11 @@ GraphRAG (Graph Retrieval-Augmented Generation) 是 Kg4se 项目的核心知识�
 | Stage 1 | 指代消解 | 解析代词和引用，明确实体指向 | NLP指代消解模型 |
 | Stage 2 | 实体链接 | 识别文本中的概念实体并链接到知识库 | 多路召回+精排+NIL检测 |
 | Stage 3 | 论断抽取 | 从文本中提取结构化知识三元组 | LLM提示词工程 |
-| Stage 4 | 主题构建 | 将相关概念聚类形成主题社区 | Louvain社区检测算法 |
-| Stage 5 | 谓词治理 | 规范化关系类型，合并同义谓词 | 谓词映射规则 |
-| Stage 6 | 图谱服务 | 将结构化知识持久化到Neo4j | MERGE幂等落库 |
-| Stage 7 | 查询服务 | 实现基于图谱的智能检索 | GraphRAG查询策略 |
+| Stage 4 | 谓词治理 | 规范化关系类型，合并同义谓词 | 谓词映射规则 |
+| Stage 5 | 图谱服务 | 将结构化知识持久化到Neo4j | MERGE幂等落库 |
+| Stage 6 | 主题构建 | 将相关概念聚类形成主题社区 | Louvain社区检测算法 |
+| Stage 7 | 指标评估 | 计算知识图谱质量指标 | 孤立节点检测、度分布分析 |
+| Stage 8 | 查询服务 | 实现基于图谱的智能检索 | GraphRAG查询策略 |
 
 ### Stage 0: 语义分块 (Chunker)
 
@@ -228,25 +229,7 @@ concepts:
 
 ---
 
-### Stage 4: 主题构建 (Theme Building)
-
-**目标**: 将相关概念聚类形成主题社区
-
-**算法**:
-- **Louvain 社区检测**: 识别紧密连接的概念组
-- **层次聚类**: 构建多层主题结构
-- **摘要生成**: 为每个主题生成描述性摘要
-
-**示例**:
-```
-主题: "软件开发流程"
-概念: [需求分析, 系统设计, 编码实现, 软件测试]
-摘要: "描述软件开发的完整生命周期..."
-```
-
----
-
-### Stage 5: 谓词治理 (Predicate Governance)
+### Stage 4: 谓词治理 (Predicate Governance)
 
 **目标**: 规范化关系类型,合并同义谓词
 
@@ -269,7 +252,7 @@ predicates:
 
 ---
 
-### Stage 6: 图谱服务 (Graph Service)
+### Stage 5: 图谱服务 (Graph Service)
 
 **目标**: 将结构化知识持久化到 Neo4j
 
@@ -290,7 +273,52 @@ ON CREATE SET r.weight = $weight
 
 ---
 
-### Stage 7: 查询服务 (Query Service)
+### Stage 6: 主题构建 (Theme Building)
+
+**目标**: 将相关概念聚类形成主题社区
+
+**算法**:
+- **Louvain 社区检测**: 识别紧密连接的概念组
+- **层次聚类**: 构建多层主题结构
+- **摘要生成**: 为每个主题生成描述性摘要
+
+**示例**:
+```
+主题: "软件开发流程"
+概念: [需求分析, 系统设计, 编码实现, 软件测试]
+摘要: "描述软件开发的完整生命周期..."
+```
+
+---
+
+### Stage 7: 指标评估 (Metrics Service)
+
+**目标**: 评估知识图谱质量
+
+**指标**:
+
+| 指标类别 | 指标名称 | 描述 |
+|---------|---------|------|
+| 完整性 | 覆盖率 | 文档知识点的覆盖比例 |
+| 准确性 | 三元组准确率 | 正确论断的比例 |
+| 一致性 | 冲突率 | 矛盾知识的数量 |
+| 连接性 | 平均度数 | 节点平均连接数 |
+| 社区性 | 模块度 | 社区划分质量 |
+
+```python
+from graphrag.stages.stage7_metrics_service import MetricsService
+
+metrics = await MetricsService().evaluate()
+
+print(f"节点数: {metrics['node_count']}")
+print(f"边数: {metrics['edge_count']}")
+print(f"平均度数: {metrics['avg_degree']}")
+print(f"连通分量: {metrics['components']}")
+```
+
+---
+
+### Stage 8: 查询服务 (Query Service)
 
 **目标**: 实现基于图谱的智能检索
 
@@ -302,7 +330,7 @@ ON CREATE SET r.weight = $weight
 
 **示例查询**:
 ```python
-from graphrag.stages.stage7_query_service import QueryService
+from graphrag.stages.stage8_query_service import QueryService
 
 query_service = QueryService()
 
@@ -318,33 +346,6 @@ paths = await query_service.find_paths(
     end="敏捷开发",
     max_depth=3
 )
-```
-
----
-
-### Stage 8: 指标评估 (Metrics Service)
-
-**目标**: 评估知识图谱质量
-
-**指标**:
-
-| 指标类别 | 指标名称 | 描述 |
-|---------|---------|------|
-| 完整性 | 覆盖率 | 文档知识点的覆盖比例 |
-| 准确性 | 三元组准确率 | 正确论断的比例 |
-| 一致性 | 冲突率 | 矛盾知识的数量 |
-| 连接性 | 平均度数 | 节点平均连接数 |
-| 社区性 | 模块度 | 社区划分质量 |
-
-```python
-from graphrag.stages.stage8_metrics_service import MetricsService
-
-metrics = await MetricsService().evaluate()
-
-print(f"节点数: {metrics['node_count']}")
-print(f"边数: {metrics['edge_count']}")
-print(f"平均度数: {metrics['avg_degree']}")
-print(f"连通分量: {metrics['components']}")
 ```
 
 ## ⚙️ 配置说明

@@ -13,7 +13,7 @@ class Theme(BaseModel):
     """
     主题模型
     
-    用于阶段 4: 主题社区
+    用于阶段 6: 主题社区
     """
     
     id: str = Field(..., description="主题唯一标识")

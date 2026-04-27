@@ -374,7 +374,7 @@ def _create_graph_service():
 
 def _create_query_service():
     """创建查询服务实例"""
-    from graphrag.stages.stage7_query_service import QueryService
+    from graphrag.stages.stage8_query_service import QueryService
     return QueryService()
 
 

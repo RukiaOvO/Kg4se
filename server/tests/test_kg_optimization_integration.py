@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 集成测试：验证知识图谱优化的实际效果
 Integration Test: Verify Knowledge Graph Optimization Results
@@ -19,7 +19,7 @@ def test_entity_type_validation():
     print("="*60)
     
     try:
-        from graphrag.stages.stage6_graph_service import ALLOWED_ENTITY_TYPES
+        from graphrag.stages.stage5_graph_service import ALLOWED_ENTITY_TYPES
         
         print(f"\n✅ 允许的实体类型 ({len(ALLOWED_ENTITY_TYPES)} 种):")
         for entity_type in sorted(ALLOWED_ENTITY_TYPES):
@@ -62,7 +62,7 @@ def test_relationship_type_validation():
     print("="*60)
     
     try:
-        from graphrag.stages.stage6_graph_service import ALLOWED_RELATIONSHIP_TYPES
+        from graphrag.stages.stage5_graph_service import ALLOWED_RELATIONSHIP_TYPES
         
         print(f"\n✅ 允许的关系类型 ({len(ALLOWED_RELATIONSHIP_TYPES)} 种):")
         for rel_type in sorted(ALLOWED_RELATIONSHIP_TYPES):
@@ -105,7 +105,7 @@ def test_predicate_allowlist():
     print("="*60)
     
     try:
-        from graphrag.stages.stage5_predicate_governor import ALLOWED_PREDICATES
+        from graphrag.stages.stage4_predicate_governor import ALLOWED_PREDICATES
         
         print(f"\n✅ 允许的谓词 ({len(ALLOWED_PREDICATES)} 种):")
         for predicate in sorted(ALLOWED_PREDICATES):

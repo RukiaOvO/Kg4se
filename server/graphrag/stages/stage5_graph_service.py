@@ -1,5 +1,5 @@
 """
-阶段 6: 幂等落库 (Graph Service)
+阶段 5: 幂等落库 (Graph Service)
 
 将构建结果写入 Neo4j，确保幂等性与证据回溯
 使用 Neo4j 向量索引进行向量检索
@@ -12,7 +12,7 @@ from infra.neo4j_client import Neo4jClient
 from config import settings
 from graphrag.utils.domain_filter import get_domain_filter
 
-logger = logging.getLogger("graphrag.stage6")
+logger = logging.getLogger("graphrag.stage5")
 
 ALLOWED_ENTITY_TYPES = {
     "Document",

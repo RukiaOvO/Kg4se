@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """综合集成验证脚本 - 验证文档管理功能实现"""
 
 import sys
@@ -183,8 +183,8 @@ def check_python_syntax():
     
     python_files = [
         "../routes/upload.py",
-        "../graphrag/stages/stage6_graph_service.py",
-        "../graphrag/stages/stage8_metrics_service.py",
+        "../graphrag/stages/stage5_graph_service.py",
+        "../graphrag/stages/stage7_metrics_service.py",
     ]
     
     all_ok = True

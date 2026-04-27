@@ -37,8 +37,8 @@
             <n-input-number
               v-model:value="nodeLimit"
               :min="10"
-              :max="10000"
-              :step="10"
+              :max="50000"
+              :step="50"
               style="width: 200px"
               size="small"
             >
@@ -422,12 +422,10 @@ const dialog = useDialog()
 const route = useRoute()
 const router = useRouter()
 const nodeLimit = ref(500)
+const skeletonNodeCount = ref(10)
 const documentDepth = ref(2)
 const currentDocumentId = ref<string | null>(null)
 const documentOptions = ref<Array<{ label: string; value: string; meta?: any }>>([])
-const debouncedLoadGraph = useDebounceFn(async () => {
-  await loadGraph()
-}, 300)
 const search = useDebounceFn(async (keyword: string) => {
   const results = await api.search(keyword)
   // 处理结果
@@ -436,7 +434,7 @@ const docInfo = ref<{ id: string; filename?: string; created_at?: string } | nul
 const loading = ref(false)
 const graphContainer = ref<HTMLElement | null>(null)
 const graphData = ref<{ nodes: ElementDefinition[]; edges: ElementDefinition[] } | null>(null)
-const layoutType = ref('dagre')
+const layoutType = ref('cose')
 const selectedNode = ref<{ id: string; label: string; properties: Record<string, any> } | null>(null)
 const searchKeyword = ref('')
 const showNodeDetail = ref(false)
@@ -472,11 +470,11 @@ const edgeCreateForm = ref<{ source: string; target: string; type: string; prope
 
 // Layout options
 const layoutOptions = [
+  { label: '力导向', value: 'cose' },
   { label: '层级布局', value: 'dagre' },
   { label: '圆形布局', value: 'circle' },
   { label: '网格布局', value: 'grid' },
-  { label: '同心圆', value: 'concentric' },
-  { label: '力导向', value: 'cose' }
+  { label: '同心圆', value: 'concentric' }
 ]
 
 const loadDocuments = async () => {
@@ -500,7 +498,6 @@ const handleDocumentChange = async (value: string | null) => {
   } else {
     await router.replace({ path: '/graph' })
   }
-  await loadGraph()
 }
 
 const loadGraph = async () => {
@@ -518,6 +515,10 @@ const loadGraph = async () => {
     if (!result) {
       message.warning(t('graph.no_data'))
       return
+    }
+
+    if (result.stats?.skeleton_count) {
+      skeletonNodeCount.value = result.stats.skeleton_count
     }
 
     let nodes: ElementDefinition[] = []
@@ -679,67 +680,65 @@ const renderGraph = () => {
 
   const nodeCount = graphData.value.nodes.length
   const edgeCount = graphData.value.edges.length
-  
-  // Performance optimizations based on node count
-  const shouldAnimate = nodeCount < 200
-  const shouldShowLabels = nodeCount < 500
-  const shouldSimplify = nodeCount >= 1000
-  
-  if (nodeCount >= 500) {
-    message.warning(`图谱包含 ${nodeCount} 个节点和 ${edgeCount} 条边，可能会影响渲染性能。建议使用文档过滤功能或减小节点数量限制。`)
+
+  const isLargeGraph = nodeCount >= 500
+  const isHugeGraph = nodeCount >= 2000
+
+  if (isLargeGraph) {
+    message.info(`图谱包含 ${nodeCount} 个节点和 ${edgeCount} 条边，已启用大图谱优化模式。缩放可查看节点/关系标签。`)
   }
 
-  const layoutOptions: any = {
+  const layoutConfig: any = {
     name: layoutType.value,
     rankDir: 'TB',
-    spacingFactor: shouldSimplify ? 1.2 : 1.5,
-    animate: shouldAnimate,
+    spacingFactor: isHugeGraph ? 1.0 : isLargeGraph ? 1.2 : 1.5,
+    animate: !isLargeGraph,
     animationDuration: 300,
     randomize: false
   }
 
-  // Build dynamic styles based on node count
-  const nodeWidth = shouldSimplify ? 20 : 40
-  const nodeHeight = shouldSimplify ? 20 : 40
-  const fontSize = shouldSimplify ? 8 : 12
-  
+  const nodeWidth = isHugeGraph ? 16 : isLargeGraph ? 24 : 40
+  const nodeHeight = isHugeGraph ? 16 : isLargeGraph ? 24 : 40
+  const fontSize = isHugeGraph ? 9 : isLargeGraph ? 10 : 12
+  const edgeWidth = isHugeGraph ? 0.8 : isLargeGraph ? 1.2 : 2
+
   const nodeStyle: any = {
     'background-color': '#18a058',
     'width': nodeWidth,
     'height': nodeHeight,
-    'border-width': shouldSimplify ? 1 : 3,
+    'border-width': isHugeGraph ? 1 : isLargeGraph ? 2 : 3,
     'border-color': '#fff',
-    'box-shadow': shouldSimplify ? 'none' : '0 4px 8px rgba(0,0,0,0.15)'
+    'label': 'data(label)',
+    'text-valign': 'bottom',
+    'text-halign': 'center',
+    'text-margin-y': '6px',
+    'font-size': `${fontSize}px`,
+    'font-weight': 500,
+    'font-family': 'Noto Serif SC, sans-serif',
+    'color': '#333',
+    'text-background-color': '#fff',
+    'text-background-opacity': 0.85,
+    'text-background-padding': '3px',
+    'text-opacity': 0
   }
-  
-  if (shouldShowLabels) {
-    nodeStyle['label'] = 'data(label)'
-    nodeStyle['text-valign'] = 'bottom'
-    nodeStyle['text-halign'] = 'center'
-    nodeStyle['text-margin-y'] = '8px'
-    nodeStyle['font-size'] = `${fontSize}px`
-    nodeStyle['font-weight'] = 500
-    nodeStyle['font-family'] = 'Noto Serif SC, sans-serif'
-    nodeStyle['color'] = '#333'
-    nodeStyle['text-background-color'] = '#fff'
-    nodeStyle['text-background-opacity'] = 0.8
-    nodeStyle['text-background-padding'] = '4px'
+
+  if (!isHugeGraph) {
+    nodeStyle['box-shadow'] = '0 2px 4px rgba(0,0,0,0.1)'
   }
-  
+
   const edgeStyle: any = {
-    'width': shouldSimplify ? 1 : 2,
+    'width': edgeWidth,
     'line-color': '#cbd5e1',
     'target-arrow-color': '#cbd5e1',
     'target-arrow-shape': 'triangle',
-    'curve-style': shouldSimplify ? 'straight' : 'bezier'
-  }
-  
-  if (shouldShowLabels && !shouldSimplify) {
-    edgeStyle['label'] = 'data(label)'
-    edgeStyle['font-size'] = '10px'
-    edgeStyle['text-background-color'] = '#fff'
-    edgeStyle['text-background-opacity'] = 0.8
-    edgeStyle['text-background-padding'] = '2px'
+    'curve-style': isHugeGraph ? 'straight' : 'bezier',
+    'label': 'data(label)',
+    'font-size': isHugeGraph ? '7px' : '9px',
+    'text-background-color': '#fff',
+    'text-background-opacity': 0.85,
+    'text-background-padding': '2px',
+    'text-opacity': 0,
+    'text-rotation': 'autorotate'
   }
 
   cy = cytoscape({
@@ -785,8 +784,9 @@ const renderGraph = () => {
         style: {
           'border-width': 4,
           'border-color': '#6366f1',
-          'width': shouldSimplify ? 26 : 50,
-          'height': shouldSimplify ? 26 : 50
+          'width': isHugeGraph ? 22 : isLargeGraph ? 30 : 50,
+          'height': isHugeGraph ? 22 : isLargeGraph ? 30 : 50,
+          'text-opacity': 1
         }
       },
       {
@@ -798,7 +798,8 @@ const renderGraph = () => {
         style: {
           'width': 3,
           'line-color': '#6366f1',
-          'target-arrow-color': '#6366f1'
+          'target-arrow-color': '#6366f1',
+          'text-opacity': 1
         }
       },
       {
@@ -808,14 +809,26 @@ const renderGraph = () => {
           'border-width': '3px !important',
           'border-color': '#FF6B6B !important',
           'line-color': '#FF6B6B !important',
-          'target-arrow-color': '#FF6B6B !important'
+          'target-arrow-color': '#FF6B6B !important',
+          'text-opacity': 1
+        }
+      },
+      {
+        selector: '.label-visible',
+        style: {
+          'text-opacity': 1
         }
       }
     ] as any),
-    layout: layoutOptions as any
+    layout: layoutConfig as any
   })
 
-  // Node click handler
+  updateLabelsByZoom()
+
+  cy.on('viewport', () => {
+    requestAnimationFrame(() => updateLabelsByZoom())
+  })
+
   cy.on('tap', 'node', (evt: any) => {
     const node = evt.target
     selectedNode.value = {
@@ -826,7 +839,6 @@ const renderGraph = () => {
     showNodeDetail.value = true
   })
 
-  // Right-click context menu
   cy.on('cxttap', 'node', (evt: any) => {
     evt.preventDefault()
     const node = evt.target
@@ -877,10 +889,48 @@ const renderGraph = () => {
     }
   })
 
-  // Close context menu on left click
   cy.on('tap', () => {
     contextMenuVisible.value = false
   })
+}
+
+const updateLabelsByZoom = () => {
+  if (!cy) return
+
+  const zoom = cy.zoom()
+  const nodeCount = graphData.value?.nodes.length || 0
+
+  let nodeZoomThreshold: number
+  let edgeZoomThreshold: number
+
+  if (nodeCount < 200) {
+    nodeZoomThreshold = 0.3
+    edgeZoomThreshold = 0.8
+  } else if (nodeCount < 500) {
+    nodeZoomThreshold = 0.5
+    edgeZoomThreshold = 1.2
+  } else if (nodeCount < 1500) {
+    nodeZoomThreshold = 0.8
+    edgeZoomThreshold = 2.0
+  } else {
+    nodeZoomThreshold = 1.2
+    edgeZoomThreshold = 3.0
+  }
+
+  const showNodeLabels = zoom >= nodeZoomThreshold
+  const showEdgeLabels = zoom >= edgeZoomThreshold
+
+  if (showNodeLabels) {
+    cy.nodes().addClass('label-visible')
+  } else {
+    cy.nodes().removeClass('label-visible')
+  }
+
+  if (showEdgeLabels) {
+    cy.edges().addClass('label-visible')
+  } else {
+    cy.edges().removeClass('label-visible')
+  }
 }
 
 const searchNode = () => {
@@ -902,20 +952,22 @@ const searchNode = () => {
   })
 
   if (nodes.length > 0) {
-    // 高亮显示
-    nodes.addClass('highlighted')
+      nodes.addClass('highlighted')
 
-    // 获取关联的边
-    const connectedEdges = nodes.connectedEdges()
-    connectedEdges.addClass('highlighted')
+      const connectedEdges = nodes.connectedEdges()
+      connectedEdges.addClass('highlighted')
 
-    // 聚焦到搜索结果
-    cy.animate({
-      fit: { eles: nodes, padding: 100 },
-      duration: 500
-    })
+      const nodeCount = graphData.value?.nodes.length || 0
+      if (nodeCount < 500) {
+        cy.animate({
+          fit: { eles: nodes, padding: 100 },
+          duration: 500
+        })
+      } else {
+        cy.fit(nodes, 100)
+      }
 
-    message.success(`找到 ${nodes.length} 个节点`)
+      message.success(`找到 ${nodes.length} 个节点`)
   } else {
     message.warning('未找到匹配的节点')
   }
@@ -951,11 +1003,13 @@ const resetView = () => {
 
 const handleLayoutChange = () => {
   if (cy && graphData.value) {
+    const nodeCount = graphData.value.nodes.length
+    const isLargeGraph = nodeCount >= 500
     const layout = cy.layout(({ 
       name: layoutType.value,
-      animate: true,
+      animate: !isLargeGraph,
       animationDuration: 500,
-      spacingFactor: 1.5
+      spacingFactor: isLargeGraph ? 1.2 : 1.5
     } as any))
     layout.run()
   }
@@ -1168,7 +1222,7 @@ const chunkCount = computed(() => {
 watch(
   () => route.query.doc_id,
   async () => {
-    await debouncedLoadGraph() // TODO 添加防抖或者节流控制
+    await loadGraph()
   }
 )
 

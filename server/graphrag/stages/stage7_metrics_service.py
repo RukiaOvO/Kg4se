@@ -1,5 +1,5 @@
 """
-阶段 8: 评价与反馈 (Metrics Service)
+阶段 7: 评价与反馈 (Metrics Service)
 
 计算评价指标，收集反馈，形成治理闭环
 """
@@ -10,7 +10,7 @@ from typing import Dict, Any, List
 from graphrag.config import get_config
 from infra.neo4j_client import Neo4jClient
 
-logger = logging.getLogger("graphrag.stage8")
+logger = logging.getLogger("graphrag.stage7")
 
 
 class MetricsService:

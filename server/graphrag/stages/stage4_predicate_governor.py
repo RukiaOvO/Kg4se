@@ -1,5 +1,5 @@
 """
-阶段 5: 谓词治理 (Predicate Governor)
+阶段 4: 谓词治理 (Predicate Governor)
 
 规范化谓词，映射自然语言关系到标准谓词集
 """
@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 from graphrag.config import get_config, ConstraintResult, GovernanceStatus
 
-logger = logging.getLogger("graphrag.stage5")
+logger = logging.getLogger("graphrag.stage4")
 
 ALLOWED_PREDICATES = {
     "MENTIONS",

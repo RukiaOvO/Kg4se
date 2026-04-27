@@ -580,7 +580,7 @@ class QAService:
         """
         Answer using GraphRAG (knowledge graph + AI).
         
-        Uses Stage7 QueryService for advanced multi-path retrieval,
+        Uses Stage8 QueryService for advanced multi-path retrieval,
         then generates answer via LLM.
         
         Args:
@@ -605,7 +605,7 @@ class QAService:
             entities = []
             
             try:
-                from graphrag.stages.stage7_query_service import QueryService
+                from graphrag.stages.stage8_query_service import QueryService
                 query_svc = QueryService()
                 
                 claim_candidates, concept_candidates = query_svc._multi_path_candidate_generation(
@@ -726,7 +726,7 @@ class QAService:
             entities = []
             
             try:
-                from graphrag.stages.stage7_query_service import QueryService
+                from graphrag.stages.stage8_query_service import QueryService
                 query_svc = QueryService()
                 claim_candidates, concept_candidates = query_svc._multi_path_candidate_generation(
                     question, "hybrid", 15

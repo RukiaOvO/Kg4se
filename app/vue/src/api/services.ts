@@ -5,10 +5,31 @@ export const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 // Types
 export interface DashboardStats {
-  total_nodes: number
-  total_edges: number
+  totalDocuments: number
+  totalConcepts: number
+  totalChunks: number
+  totalEntities: number
+  totalClaims: number
+  totalRelations: number
+  skeletonNodeCount: number
+  communityCount: number
   node_labels: Record<string, number>
   edge_types: Record<string, number>
+  recentDocuments: Array<{
+    id: string
+    filename: string
+    createdAt: string
+    kind: string
+  }>
+  topConcepts: Array<{
+    name: string
+    domain: string
+    connections: number
+  }>
+  relationTypes: Array<{
+    type: string
+    count: number
+  }>
 }
 
 export interface UploadResponse {
@@ -226,25 +247,27 @@ export const deleteDocument = (documentId: string): Promise<void> =>
 export const getGraphData = (limit: number = 500): Promise<any> =>
   api.get('/graph/visualize', {
     params: {
-      limit: Math.min(limit, 10000)
+      limit,
+      edge_limit: Math.min(limit * 10, 100000)
     }
   })
 
 export const getGraphDataByType = (nodeType: string, limit: number = 500): Promise<any> =>
   api.get('/graph/visualize', {
     params: {
-      limit: Math.min(limit, 5000),
+      limit,
+      edge_limit: Math.min(limit * 10, 100000),
       node_type: nodeType
     }
   })
 
 // Graph by document
-export const getDocumentGraph = (documentId: string, depth: number = 2, limit: number = 500, edgeLimit: number = 1000): Promise<any> =>
+export const getDocumentGraph = (documentId: string, depth: number = 2, limit: number = 500): Promise<any> =>
   api.get(`/graph/documents/${documentId}/graph`, {
     params: {
       depth: Math.max(1, Math.min(depth, 5)),
-      limit: Math.min(limit, 10000),
-      edge_limit: Math.min(edgeLimit, 50000)
+      limit,
+      edge_limit: Math.min(limit * 10, 100000)
     }
   })
 

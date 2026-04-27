@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """简单的 API 测试脚本 - 不需要启动整个服务器"""
 
 import sys
@@ -125,8 +125,8 @@ def test_implementation():
     
     python_files = [
         ("upload.py", "../routes/upload.py"),
-        ("stage6_graph_service.py", "../graphrag/prompts/stages/stage6_graph_service.py"),
-        ("stage8_metrics_service.py", "../graphrag/prompts/stages/stage8_metrics_service.py"),
+        ("stage5_graph_service.py", "../graphrag/prompts/stages/stage5_graph_service.py"),
+        ("stage7_metrics_service.py", "../graphrag/prompts/stages/stage7_metrics_service.py"),
     ]
     
     for file_name, file_path in python_files:

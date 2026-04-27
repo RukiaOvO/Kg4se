@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 验证软件工程领域知识图谱优化实施情况
 Verification script for software engineering domain knowledge graph optimization
@@ -132,7 +132,7 @@ def verify_stages():
     
     # Stage 5: Predicate Governor
     print("\n2. Stage 5 - 谓词治理 (Predicate Governance)")
-    stage5_path = Path("../graphrag/stages/stage5_predicate_governor.py")
+    stage5_path = Path("../graphrag/stages/stage4_predicate_governor.py")
     if stage5_path.exists():
         content = stage5_path.read_text(encoding='utf-8')
         checks = [
@@ -148,7 +148,7 @@ def verify_stages():
     
     # Stage 6: Graph Service
     print("\n3. Stage 6 - 图谱存储 (Graph Storage)")
-    stage6_path = Path("../graphrag/stages/stage6_graph_service.py")
+    stage6_path = Path("../graphrag/stages/stage5_graph_service.py")
     if stage6_path.exists():
         content = stage6_path.read_text(encoding='utf-8')
         checks = [
@@ -277,8 +277,8 @@ def generate_summary():
    3. server/graphrag/utils/domain_filter.py (新增)
    4. server/graphrag/stages/stage2_entity_linker.py
    5. server/graphrag/prompts/claim_extraction.txt
-   6. server/graphrag/stages/stage5_predicate_governor.py
-   7. server/graphrag/stages/stage6_graph_service.py
+   6. server/graphrag/stages/stage4_predicate_governor.py
+   7. server/graphrag/stages/stage5_graph_service.py
 
 预期效果:
 - 🎯 知识图谱数据质量大幅提升

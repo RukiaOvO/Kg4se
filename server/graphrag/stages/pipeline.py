@@ -1,7 +1,7 @@
 """
 GraphRAG Pipeline - 软件工程领域知识图谱构建流水线
 
-高质量、高效率的八阶段知识图谱构建系统
+高质量、高效率的九阶段知识图谱构建系统
 支持接受parser预处理后的文本块，构建软件工程领域知识图谱
 
 阶段流程:
@@ -9,11 +9,11 @@ Stage 0: 语义分块 (SemanticChunker) - 可选，parser已预处理
 Stage 1: 指代消解 (CoreferenceResolver)
 Stage 2: 实体链接 (EntityLinker)
 Stage 3: 论断抽取 (ClaimExtractor)
-Stage 4: 主题构建 (ThemeBuilder)
-Stage 5: 谓词治理 (PredicateGovernor)
-Stage 6: 图谱存储 (GraphService)
-Stage 7: 查询服务 (QueryService) - 可选
-Stage 8: 度量服务 (MetricsService)
+Stage 4: 谓词治理 (PredicateGovernor)
+Stage 5: 图谱存储 (GraphService)
+Stage 6: 主题构建 (ThemeBuilder)
+Stage 7: 度量服务 (MetricsService)
+Stage 8: 查询服务 (QueryService) - 可选
 """
 
 import asyncio
@@ -34,11 +34,11 @@ from graphrag.stages.stage0_chunker import SemanticChunker
 from graphrag.stages.stage1_coref import CoreferenceResolver, CorefResult
 from graphrag.stages.stage2_entity_linker import EntityLinker, LinkingResult
 from graphrag.stages.stage3_claim_extractor import ClaimExtractor
-from graphrag.stages.stage4_theme_builder import ThemeBuilder
-from graphrag.stages.stage5_predicate_governor import PredicateGovernor
-from graphrag.stages.stage6_graph_service import GraphService
-from graphrag.stages.stage7_query_service import QueryService
-from graphrag.stages.stage8_metrics_service import MetricsService
+from graphrag.stages.stage4_predicate_governor import PredicateGovernor
+from graphrag.stages.stage5_graph_service import GraphService
+from graphrag.stages.stage6_theme_builder import ThemeBuilder
+from graphrag.stages.stage7_metrics_service import MetricsService
+from graphrag.stages.stage8_query_service import QueryService
 from graphrag.utils.embedding import get_embedding
 from config import settings
 
@@ -46,24 +46,23 @@ logger = logging.getLogger("graphrag.pipeline")
 
 
 class PipelineStage(Enum):
-    """流水线阶段枚举"""
     CHUNKER = 0
     COREF = 1
     ENTITY_LINKER = 2
     CLAIM_EXTRACTOR = 3
-    THEME_BUILDER = 4
-    PREDICATE_GOVERNOR = 5
-    GRAPH_SERVICE = 6
-    QUERY_SERVICE = 7
-    METRICS_SERVICE = 8
+    PREDICATE_GOVERNOR = 4
+    GRAPH_SERVICE = 5
+    THEME_BUILDER = 6
+    METRICS_SERVICE = 7
+    QUERY_SERVICE = 8
 
 
 @dataclass
 class PipelineConfig:
     """流水线配置"""
     enable_stage0: bool = False
-    enable_stage7: bool = False
-    enable_stage8: bool = True
+    enable_stage8: bool = False
+    enable_stage7: bool = True
     
     concurrency_limit: int = 5
     batch_size: int = 10
@@ -75,7 +74,7 @@ class PipelineConfig:
     save_intermediate: bool = False
     intermediate_dir: str = "./debug_output"
     
-    stages_to_run: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 8])
+    stages_to_run: List[int] = field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7])
 
 
 @dataclass
@@ -113,7 +112,8 @@ class ChunkConverter:
     def convert(
         self, 
         parser_chunks: List[ParserChunk], 
-        build_version: str
+        build_version: str,
+        doc_id: Optional[str] = None
     ) -> List[ChunkMetadata]:
         """
         转换Parser Chunk列表为ChunkMetadata列表
@@ -121,6 +121,7 @@ class ChunkConverter:
         Args:
             parser_chunks: Parser预处理后的Chunk列表
             build_version: 构建版本标签
+            doc_id: 覆盖doc_id，用于统一文档ID格式
         
         Returns:
             ChunkMetadata列表
@@ -132,13 +133,14 @@ class ChunkConverter:
                 logger.debug(f"跳过过短的Chunk: {pc.chunk_id}")
                 continue
             
-            chunk_id = f"{pc.doc_id}:{idx}"
+            effective_doc_id = doc_id or pc.doc_id
+            chunk_id = f"{effective_doc_id}:{idx}"
             
             meta = pc.meta or {}
             
             chunk = ChunkMetadata(
                 id=chunk_id,
-                doc_id=pc.doc_id,
+                doc_id=effective_doc_id,
                 text=pc.text,
                 chunk_index=idx,
                 section_path=meta.get("section"),
@@ -197,7 +199,7 @@ class GraphRAGPipeline:
     """
     GraphRAG知识图谱构建流水线
     
-    高质量、高效率的八阶段知识图谱构建系统
+    高质量、高效率的九阶段知识图谱构建系统
     专门针对软件工程领域优化
     
     使用示例:
@@ -254,11 +256,11 @@ class GraphRAGPipeline:
         self.coref_resolver = CoreferenceResolver() if 1 in stages else None
         self.entity_linker = EntityLinker(fast_mode=True) if 2 in stages else None
         self.claim_extractor = ClaimExtractor(enable_nli=False) if 3 in stages else None
-        self.theme_builder = ThemeBuilder() if 4 in stages else None
-        self.predicate_governor = PredicateGovernor() if 5 in stages else None
-        self.graph_service = GraphService() if 6 in stages else None
-        self.query_service = QueryService() if 7 in stages else None
-        self.metrics_service = MetricsService() if 8 in stages else None
+        self.predicate_governor = PredicateGovernor() if 4 in stages else None
+        self.graph_service = GraphService() if 5 in stages else None
+        self.theme_builder = ThemeBuilder() if 6 in stages else None
+        self.metrics_service = MetricsService() if 7 in stages else None
+        self.query_service = QueryService() if 8 in stages else None
         
         self.chunk_converter = ChunkConverter()
         
@@ -290,8 +292,8 @@ class GraphRAGPipeline:
         
         STAGE_NAMES = {
             0: "语义分块", 1: "指代消解", 2: "实体链接",
-            3: "论断抽取", 4: "主题构建", 5: "谓词治理",
-            6: "图谱存储", 8: "质量度量"
+            3: "论断抽取", 4: "谓词治理", 5: "图谱存储",
+            6: "主题构建", 7: "质量度量"
         }
         TOTAL_STAGES = 8
         
@@ -341,23 +343,23 @@ class GraphRAGPipeline:
             _report_progress(3, int((4 / TOTAL_STAGES) * 100))
             
             _report_progress(4, int((4 / TOTAL_STAGES) * 100) + 1)
-            themes = await self._run_stage4(doc_id, build_version, result)
+            governed_claims = await self._run_stage4(claims, result)
             _report_progress(4, int((5 / TOTAL_STAGES) * 100))
             
             _report_progress(5, int((5 / TOTAL_STAGES) * 100) + 1)
-            governed_claims = await self._run_stage5(claims, result)
+            await self._run_stage5(
+                doc_id, chunks, entities, governed_claims, relations, result
+            )
             _report_progress(5, int((6 / TOTAL_STAGES) * 100))
             
             _report_progress(6, int((6 / TOTAL_STAGES) * 100) + 1)
-            await self._run_stage6(
-                doc_id, chunks, entities, governed_claims, relations, result
-            )
+            themes = await self._run_stage6(doc_id, build_version, result)
             _report_progress(6, int((7 / TOTAL_STAGES) * 100))
             
-            if self.config.enable_stage8 and 8 in self.config.stages_to_run:
-                _report_progress(8, int((7 / TOTAL_STAGES) * 100) + 1)
-                await self._run_stage8(doc_id, result)
-                _report_progress(8, 95)
+            if self.config.enable_stage7 and 7 in self.config.stages_to_run:
+                _report_progress(7, int((7 / TOTAL_STAGES) * 100) + 1)
+                await self._run_stage7(doc_id, result)
+                _report_progress(7, 95)
             
             result.chunks_count = len(chunks)
             result.entities_count = len(entities)
@@ -406,7 +408,7 @@ class GraphRAGPipeline:
         chunks = []
         
         if parser_chunks:
-            chunks = self.chunk_converter.convert(parser_chunks, build_version)
+            chunks = self.chunk_converter.convert(parser_chunks, build_version, doc_id=doc_id)
             logger.info(f"[Stage 0] 使用Parser预处理的Chunk: {len(chunks)} 个")
         elif raw_text and self.chunker:
             chunks = self.chunker.split(doc_id, raw_text, build_version)
@@ -562,71 +564,67 @@ class GraphRAGPipeline:
         logger.info(f"[Stage 3] 完成: {len(claims)} 个唯一论断, {len(all_relations)} 个关系")
         return claims, all_relations
     
-    async def _run_stage4(
+    async def _run_stage6(
         self,
         doc_id: str,
         build_version: str,
         result: PipelineResult
     ) -> Optional[List[Any]]:
         """
-        Stage 4: 主题构建
+        Stage 6: 主题构建
         """
-        if not self.theme_builder or 4 not in self.config.stages_to_run:
-            logger.info("[Stage 4] 跳过主题构建")
+        if not self.theme_builder or 6 not in self.config.stages_to_run:
+            logger.info("[Stage 6] 跳过主题构建")
             return None
         
         stage_start = time.time()
-        logger.info(f"[Stage 4] 开始主题构建: doc_id={doc_id}")
+        logger.info(f"[Stage 6] 开始主题构建: doc_id={doc_id}")
         
         try:
             themes = self.theme_builder.build(doc_id, build_version)
             
-            result.stage_metrics["stage4"] = {
+            result.stage_metrics["stage6"] = {
                 "themes_count": len(themes) if themes else 0,
                 "execution_time": time.time() - stage_start
             }
             
-            logger.info(f"[Stage 4] 完成: {len(themes) if themes else 0} 个主题")
+            logger.info(f"[Stage 6] 完成: {len(themes) if themes else 0} 个主题")
             return themes
             
         except Exception as e:
-            logger.warning(f"[Stage 4] 主题构建失败: {e}")
-            result.stage_metrics["stage4"] = {
+            logger.warning(f"[Stage 6] 主题构建失败: {e}")
+            result.stage_metrics["stage6"] = {
                 "themes_count": 0,
                 "error": str(e),
                 "execution_time": time.time() - stage_start
             }
             return None
     
-    async def _run_stage5(
+    async def _run_stage4(
         self,
         claims: List[Claim],
         result: PipelineResult
     ) -> List[Claim]:
         """
-        Stage 5: 谓词治理
-        
-        注意：Claim对象本身不需要谓词治理，因为Claim是论断文本而非关系。
-        谓词治理主要用于ClaimRelation（论断间关系）。
-        此阶段目前直接返回所有Claim。
+        Stage 4: 谓词治理
         """
-        if not self.predicate_governor or 5 not in self.config.stages_to_run:
-            logger.info("[Stage 5] 跳过谓词治理")
+        if not self.predicate_governor or 4 not in self.config.stages_to_run:
+            logger.info("[Stage 4] 跳过谓词治理")
             return claims
         
         stage_start = time.time()
-        logger.info(f"[Stage 5] 谓词治理: 直接接受 {len(claims)} 个论断")
+        logger.info(f"[Stage 4] 谓词治理: 直接接受 {len(claims)} 个论断")
         
-        result.stage_metrics["stage5"] = {
+        result.stage_metrics["stage4"] = {
             "accepted": len(claims),
             "rejected": 0,
             "execution_time": time.time() - stage_start
         }
         
-        logger.info(f"[Stage 5] 完成: 接受={len(claims)}")
+        logger.info(f"[Stage 4] 完成: 接受={len(claims)}")
         return claims
     
-    async def _run_stage6(
+    async def _run_stage5(
         self,
         doc_id: str,
         chunks: List[ChunkMetadata],
@@ -636,19 +634,19 @@ class GraphRAGPipeline:
         result: PipelineResult
     ) -> None:
         """
-        Stage 6: 图谱存储
+        Stage 5: 图谱存储
         """
-        if not self.graph_service or 6 not in self.config.stages_to_run:
-            logger.info("[Stage 6] 跳过图谱存储")
+        if not self.graph_service or 5 not in self.config.stages_to_run:
+            logger.info("[Stage 5] 跳过图谱存储")
             return
         
         stage_start = time.time()
-        logger.info(f"[Stage 6] 开始图谱存储: doc_id={doc_id}, chunks={len(chunks)}, entities={len(entities)}, claims={len(claims)}, relations={len(relations)}")
+        logger.info(f"[Stage 5] 开始图谱存储: doc_id={doc_id}, chunks={len(chunks)}, entities={len(entities)}, claims={len(claims)}, relations={len(relations)}")
         
         # 打印第一个 chunk 的详细信息用于调试
         if chunks:
             first_chunk = chunks[0]
-            logger.info(f"[Stage 6] 第一个Chunk详情: id={first_chunk.id}, doc_id={first_chunk.doc_id}, text_len={len(first_chunk.text)}")
+            logger.info(f"[Stage 5] 第一个Chunk详情: id={first_chunk.id}, doc_id={first_chunk.doc_id}, text_len={len(first_chunk.text)}")
         
         chunks_stored = 0
         entities_stored = 0
@@ -661,7 +659,7 @@ class GraphRAGPipeline:
         belongs_to_theme_relations_stored = 0
         
         # 1. 存储 Chunk 节点
-        logger.info(f"[Stage 6] 开始存储 {len(chunks)} 个 Chunk 节点")
+        logger.info(f"[Stage 5] 开始存储 {len(chunks)} 个 Chunk 节点")
         for chunk in chunks:
             try:
                 self.graph_service.store_chunk(chunk.model_dump())
@@ -677,15 +675,15 @@ class GraphRAGPipeline:
                     )
                     contains_relations_stored += 1
                 except Exception as e:
-                    logger.warning(f"[Stage 6] 存储 CONTAINS 关系失败: {e}")
+                    logger.warning(f"[Stage 5] 存储 CONTAINS 关系失败: {e}")
                     
             except Exception as e:
-                logger.warning(f"[Stage 6] 存储Chunk {chunk.id} 失败: {e}")
+                logger.warning(f"[Stage 5] 存储Chunk {chunk.id} 失败: {e}")
         
-        logger.info(f"[Stage 6] Chunk 存储完成: {chunks_stored}/{len(chunks)}, CONTAINS关系: {contains_relations_stored}")
+        logger.info(f"[Stage 5] Chunk 存储完成: {chunks_stored}/{len(chunks)}, CONTAINS关系: {contains_relations_stored}")
         
         # 2. 存储实体节点（Concept）- 先生成向量再存储
-        logger.info(f"[Stage 6] 开始存储 {len(entities)} 个实体节点并创建 MENTIONS 关系")
+        logger.info(f"[Stage 5] 开始存储 {len(entities)} 个实体节点并创建 MENTIONS 关系")
         
         # 为Concept生成向量嵌入
         entities = self._generate_entity_embeddings_batch(entities)
@@ -719,7 +717,7 @@ class GraphRAGPipeline:
                             )
                             mentions_relations_stored += 1
                         except Exception as e:
-                            logger.warning(f"[Stage 6] 存储 MENTIONS 关系失败: {e}")
+                            logger.warning(f"[Stage 5] 存储 MENTIONS 关系失败: {e}")
                         
                         # 创建 Concept → Chunk 的 EVIDENCE_FROM 关系
                         try:
@@ -731,13 +729,13 @@ class GraphRAGPipeline:
                             )
                             evidence_from_relations_stored += 1
                         except Exception as e:
-                            logger.warning(f"[Stage 6] 存储 EVIDENCE_FROM 关系失败: {e}")
+                            logger.warning(f"[Stage 5] 存储 EVIDENCE_FROM 关系失败: {e}")
                             
             except Exception as e:
-                logger.warning(f"[Stage 6] 存储实体失败: {e}")
+                logger.warning(f"[Stage 5] 存储实体失败: {e}")
         
         # 3. 存储 Claim 节点 - 先生成向量再存储
-        logger.info(f"[Stage 6] 开始存储 {len(claims)} 个 Claim 节点并创建 CONTAINS_CLAIM 关系")
+        logger.info(f"[Stage 5] 开始存储 {len(claims)} 个 Claim 节点并创建 CONTAINS_CLAIM 关系")
         
         # 为Claim生成向量嵌入
         claims = self._generate_claim_embeddings_batch(claims)
@@ -760,7 +758,7 @@ class GraphRAGPipeline:
                         )
                         contains_claim_relations_stored += 1
                     except Exception as e:
-                        logger.warning(f"[Stage 6] 存储 CONTAINS_CLAIM 关系失败: {e}")
+                        logger.warning(f"[Stage 5] 存储 CONTAINS_CLAIM 关系失败: {e}")
                     
                     # 创建 Claim → Chunk 的 EVIDENCE_FROM 关系
                     try:
@@ -772,7 +770,7 @@ class GraphRAGPipeline:
                         )
                         evidence_from_relations_stored += 1
                     except Exception as e:
-                        logger.warning(f"[Stage 6] 存储 EVIDENCE_FROM 关系失败: {e}")
+                        logger.warning(f"[Stage 5] 存储 EVIDENCE_FROM 关系失败: {e}")
                 
                 # 存储带证据的 Claim
                 if claim.chunk_id:
@@ -783,10 +781,10 @@ class GraphRAGPipeline:
                     )
                     
             except Exception as e:
-                logger.warning(f"[Stage 6] 存储论断 {claim.id} 失败: {e}")
+                logger.warning(f"[Stage 5] 存储论断 {claim.id} 失败: {e}")
         
         # 4. 存储 Claim 之间的关系
-        logger.info(f"[Stage 6] 开始存储 {len(relations)} 个 Claim 之间的关系")
+        logger.info(f"[Stage 5] 开始存储 {len(relations)} 个 Claim 之间的关系")
         for relation in relations:
             try:
                 self.graph_service.store_relation({
@@ -802,9 +800,9 @@ class GraphRAGPipeline:
                 relations_stored += 1
                 
             except Exception as e:
-                logger.warning(f"[Stage 6] 存储关系失败: {e}")
+                logger.warning(f"[Stage 5] 存储关系失败: {e}")
         
-        result.stage_metrics["stage6"] = {
+        result.stage_metrics["stage5"] = {
             "chunks_stored": chunks_stored,
             "entities_stored": entities_stored,
             "claims_stored": claims_stored,
@@ -817,46 +815,46 @@ class GraphRAGPipeline:
             "execution_time": time.time() - stage_start
         }
         
-        logger.info(f"[Stage 6] 完成: chunks={chunks_stored}, entities={entities_stored}, "
+        logger.info(f"[Stage 5] 完成: chunks={chunks_stored}, entities={entities_stored}, "
                    f"claims={claims_stored}, relations={relations_stored}, "
                    f"mentions={mentions_relations_stored}, contains_claim={contains_claim_relations_stored}, "
                    f"contains={contains_relations_stored}, evidence_from={evidence_from_relations_stored}")
     
-    async def _run_stage8(
+    async def _run_stage7(
         self,
         doc_id: str,
         result: PipelineResult
     ) -> None:
         """
-        Stage 8: 度量服务
+        Stage 7: 度量服务
         """
-        if not self.metrics_service or 8 not in self.config.stages_to_run:
-            logger.info("[Stage 8] 跳过度量服务")
+        if not self.metrics_service or 7 not in self.config.stages_to_run:
+            logger.info("[Stage 7] 跳过度量服务")
             return
         
         stage_start = time.time()
-        logger.info(f"[Stage 8] 开始度量计算: doc_id={doc_id}")
+        logger.info(f"[Stage 7] 开始度量计算: doc_id={doc_id}")
         
         try:
             metrics = self.metrics_service.compute_metrics(doc_id)
             alerts = self.metrics_service.check_alerts(metrics)
             
             result.quality_metrics = metrics
-            result.stage_metrics["stage8"] = {
+            result.stage_metrics["stage7"] = {
                 "metrics": metrics,
                 "alerts": alerts,
                 "execution_time": time.time() - stage_start
             }
             
-            logger.info(f"[Stage 8] 完成: 孤立节点比例={metrics.get('isolated_node_ratio', 0):.2%}, "
+            logger.info(f"[Stage 7] 完成: 孤立节点比例={metrics.get('isolated_node_ratio', 0):.2%}, "
                        f"平均度数={metrics.get('avg_degree', 0):.2f}")
             
             if alerts:
-                logger.warning(f"[Stage 8] 质量告警: {alerts}")
+                logger.warning(f"[Stage 7] 质量告警: {alerts}")
                 
         except Exception as e:
-            logger.warning(f"[Stage 8] 度量计算失败: {e}")
-            result.stage_metrics["stage8"] = {
+            logger.warning(f"[Stage 7] 度量计算失败: {e}")
+            result.stage_metrics["stage7"] = {
                 "error": str(e),
                 "execution_time": time.time() - stage_start
             }
@@ -1043,8 +1041,8 @@ class GraphRAGPipeline:
 def create_pipeline(
     stages: Optional[List[int]] = None,
     enable_stage0: bool = False,
-    enable_stage7: bool = False,
-    enable_stage8: bool = True,
+    enable_stage8: bool = False,
+    enable_stage7: bool = True,
     concurrency_limit: int = 5,
     min_confidence: float = 0.6
 ) -> GraphRAGPipeline:
@@ -1052,10 +1050,10 @@ def create_pipeline(
     创建GraphRAG流水线的便捷函数
     
     Args:
-        stages: 要运行的阶段列表，默认 [1,2,3,4,5,6,8]
+        stages: 要运行的阶段列表，默认 [1,2,3,4,5,6,7]
         enable_stage0: 是否启用Stage 0（语义分块）
-        enable_stage7: 是否启用Stage 7（查询服务）
-        enable_stage8: 是否启用Stage 8（度量服务）
+        enable_stage8: 是否启用Stage 8（查询服务）
+        enable_stage7: 是否启用Stage 7（度量服务）
         concurrency_limit: 并发限制
         min_confidence: 最低置信度阈值
     
@@ -1064,9 +1062,9 @@ def create_pipeline(
     """
     config = PipelineConfig(
         enable_stage0=enable_stage0,
-        enable_stage7=enable_stage7,
         enable_stage8=enable_stage8,
-        stages_to_run=stages or [1, 2, 3, 4, 5, 6, 8],
+        enable_stage7=enable_stage7,
+        stages_to_run=stages or [1, 2, 3, 4, 5, 6, 7],
         concurrency_limit=concurrency_limit,
         min_confidence=min_confidence
     )

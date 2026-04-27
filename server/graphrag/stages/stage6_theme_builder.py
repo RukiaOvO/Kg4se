@@ -1,5 +1,5 @@
 """
-阶段 4: 主题社区 (Theme Builder)
+阶段 6: 主题社区 (Theme Builder)
 
 使用 Louvain 算法构建主题社区，并生成主题摘要
 """
@@ -20,7 +20,14 @@ from services.config_service import config_service
 from graphrag.utils.embedding import cosine_similarity
 from prompts import PromptManager
 
-logger = logging.getLogger("graphrag.stage4")
+try:
+    import networkx as nx
+    from networkx.algorithms.community import louvain_communities
+    _NX_AVAILABLE = True
+except ImportError:
+    _NX_AVAILABLE = False
+
+logger = logging.getLogger("graphrag.stage6")
 
 
 class ThemeBuilder:
@@ -124,12 +131,7 @@ class ThemeBuilder:
             query = f"""
             CALL gds.graph.project(
                 '{graph_name}',
-                {{
-                    Concept: {{
-                        label: 'Concept',
-                        properties: {{}}
-                    }}
-                }},
+                'Concept',
                 {{
                     RELATED_TO: {{
                         type: 'RELATED_TO',
@@ -141,25 +143,15 @@ class ThemeBuilder:
                             }}
                         }}
                     }}
-                }},
-                {{
-                    nodeQuery: 'MATCH (c:Concept) WHERE EXISTS {{ MATCH (c)-[:RELATED_TO]-(:Concept) }} RETURN elementId(c) AS id',
-                    relationshipQuery: 'MATCH (c1:Concept)-[r:RELATED_TO]-(c2:Concept) WHERE r.weight IS NOT NULL RETURN elementId(c1) AS source, elementId(c2) AS target, r.weight AS weight',
-                    relationshipProperties: {{
-                        weight: {{
-                            property: 'weight',
-                            defaultValue: 1.0
-                        }}
-                    }}
                 }}
             )
             YIELD graphName, nodeCount, relationshipCount
             """
             
-            logger.debug(f"[Stage4] 执行 GDS 投影查询, doc_id={doc_id}")
+            logger.debug(f"[Stage6] 执行 GDS 投影查询, doc_id={doc_id}")
             try:
                 result = neo4j_client.execute_query(query, {"doc_id": doc_id})
-                logger.debug(f"[Stage4] GDS 投影查询返回: {result}")
+                logger.debug(f"[Stage6] GDS 投影查询返回: {result}")
                 logger.debug(f"GDS 图投影创建成功: {graph_name}")
             except Exception as e:
                 logger.warning(f"GDS 投影失败，使用简化方法: {e}")
@@ -199,7 +191,7 @@ class ThemeBuilder:
         """
         cooccur_results = neo4j_client.execute_query(cooccur_query, {"doc_id": doc_id})
         
-        logger.debug(f"[Stage4] 共现查询返回: {len(cooccur_results)} 条记录")
+        logger.debug(f"[Stage6] 共现查询返回: {len(cooccur_results)} 条记录")
         
         # 归一化共现次数（使用对数归一化）
         cooccur_pairs = {}
@@ -212,10 +204,10 @@ class ThemeBuilder:
             
             # 防御性处理：确保名称是字符串，不是 dict
             if isinstance(c1_name, dict):
-                logger.warning(f"[Stage4] c1_name 是 dict 类型: {type(c1_name)}, 尝试提取 name 字段")
+                logger.warning(f"[Stage6] c1_name 是 dict 类型: {type(c1_name)}, 尝试提取 name 字段")
                 c1_name = c1_name.get("name") if c1_name.get("name") else str(c1_name)
             if isinstance(c2_name, dict):
-                logger.warning(f"[Stage4] c2_name 是 dict 类型: {type(c2_name)}, 尝试提取 name 字段")
+                logger.warning(f"[Stage6] c2_name 是 dict 类型: {type(c2_name)}, 尝试提取 name 字段")
                 c2_name = c2_name.get("name") if c2_name.get("name") else str(c2_name)
             
             if not isinstance(c1_name, str):
@@ -230,10 +222,10 @@ class ThemeBuilder:
                     cooccur_pairs[key] = int(count) if count else 0
                     max_cooccur = max(max_cooccur, cooccur_pairs[key])
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"[Stage4] 共现 count 转换失败: {count}, error: {e}")
+                    logger.warning(f"[Stage6] 共现 count 转换失败: {count}, error: {e}")
                     pass
             else:
-                logger.warning(f"[Stage4] 跳过无效共现记录: c1_name={c1_name}({type(c1_name)}), c2_name={c2_name}({type(c2_name)})")
+                logger.warning(f"[Stage6] 跳过无效共现记录: c1_name={c1_name}({type(c1_name)}), c2_name={c2_name}({type(c2_name)})")
         
         # 2. 计算语义相似度（基于 Concept embedding）- 优化：使用向量化批量计算
         logger.debug("计算语义相似度...")
@@ -249,29 +241,29 @@ class ThemeBuilder:
         
         # 构建 embedding 字典
         concept_embeddings = {}
-        logger.debug(f"[Stage4] 语义查询返回: {len(semantic_results)} 条记录")
+        logger.debug(f"[Stage6] 语义查询返回: {len(semantic_results)} 条记录")
         
         for record in semantic_results:
             name = record.get("name")
             embedding = record.get("embedding")
             
-            logger.debug(f"[Stage4] 处理 concept: name={name}({type(name)}), embedding={type(embedding)}")
+            logger.debug(f"[Stage6] 处理 concept: name={name}({type(name)}), embedding={type(embedding)}")
             
             # 防御性处理：确保名称和 embedding 是正确类型
             if not isinstance(name, str):
                 if isinstance(name, dict):
-                    logger.warning(f"[Stage4] name 是 dict 类型: {name}")
+                    logger.warning(f"[Stage6] name 是 dict 类型: {name}")
                     name = name.get("name") if name.get("name") else str(name)
                 else:
                     name = str(name) if name is not None else None
             
             # 防御性处理：确保 embedding 是 list 类型，不是 dict 或其他
             if embedding is not None and not isinstance(embedding, list):
-                logger.warning(f"[Stage4] embedding 不是 list: type={type(embedding)}, value={str(embedding)[:100]}...")
+                logger.warning(f"[Stage6] embedding 不是 list: type={type(embedding)}, value={str(embedding)[:100]}...")
                 if isinstance(embedding, dict):
                     # 如果是 dict，尝试提取数值
                     embedding = embedding.get("data") or embedding.get("vector") or list(embedding.values()) if embedding else None
-                    logger.warning(f"[Stage4] 尝试从 dict 提取 embedding: {type(embedding)}")
+                    logger.warning(f"[Stage6] 尝试从 dict 提取 embedding: {type(embedding)}")
                 else:
                     embedding = None
             
@@ -280,12 +272,12 @@ class ThemeBuilder:
                 try:
                     concept_embeddings[name] = [float(x) for x in embedding]
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"[Stage4] embedding 转换失败: name={name}, error: {e}")
+                    logger.warning(f"[Stage6] embedding 转换失败: name={name}, error: {e}")
                     continue
             else:
-                logger.warning(f"[Stage4] 跳过无效 embedding: name={name}({type(name)}), embedding={embedding}({type(embedding)})")
+                logger.warning(f"[Stage6] 跳过无效 embedding: name={name}({type(name)}), embedding={embedding}({type(embedding)})")
         
-        logger.debug(f"[Stage4] 语义查询返回: {len(semantic_results)} 条记录, 有效embeddings: {len(concept_embeddings)}")
+        logger.debug(f"[Stage6] 语义查询返回: {len(semantic_results)} 条记录, 有效embeddings: {len(concept_embeddings)}")
         
         # 优化：使用向量化批量计算所有概念对的语义相似度
         semantic_pairs = {}
@@ -326,7 +318,7 @@ class ThemeBuilder:
         """
         claim_results = neo4j_client.execute_query(claim_query, {"doc_id": doc_id})
         
-        logger.debug(f"[Stage4] 论断共现查询返回: {len(claim_results)} 条记录")
+        logger.debug(f"[Stage6] 论断共现查询返回: {len(claim_results)} 条记录")
         
         claim_pairs = {}
         max_claim_cooccur = 0
@@ -338,10 +330,10 @@ class ThemeBuilder:
             
             # 防御性处理：确保名称是字符串，不是 dict
             if isinstance(c1_name, dict):
-                logger.warning(f"[Stage4] claim c1_name 是 dict 类型: {type(c1_name)}, 尝试提取 name 字段")
+                logger.warning(f"[Stage6] claim c1_name 是 dict 类型: {type(c1_name)}, 尝试提取 name 字段")
                 c1_name = c1_name.get("name") if c1_name.get("name") else str(c1_name)
             if isinstance(c2_name, dict):
-                logger.warning(f"[Stage4] claim c2_name 是 dict 类型: {type(c2_name)}, 尝试提取 name 字段")
+                logger.warning(f"[Stage6] claim c2_name 是 dict 类型: {type(c2_name)}, 尝试提取 name 字段")
                 c2_name = c2_name.get("name") if c2_name.get("name") else str(c2_name)
             
             if not isinstance(c1_name, str):
@@ -355,16 +347,16 @@ class ThemeBuilder:
                     claim_pairs[key] = int(count) if count else 0
                     max_claim_cooccur = max(max_claim_cooccur, claim_pairs[key])
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"[Stage4] claim count 转换失败: {count}, error: {e}")
+                    logger.warning(f"[Stage6] claim count 转换失败: {count}, error: {e}")
                     pass
             else:
-                logger.warning(f"[Stage4] 跳过无效论断共现记录: c1_name={c1_name}({type(c1_name)}), c2_name={c2_name}({type(c2_name)})")
+                logger.warning(f"[Stage6] 跳过无效论断共现记录: c1_name={c1_name}({type(c1_name)}), c2_name={c2_name}({type(c2_name)})")
         
         # 4. 融合权重并归一化（同时保存归一化权重，避免重复计算）
         logger.debug("融合多源权重...")
         all_pairs = set(cooccur_pairs.keys()) | set(semantic_pairs.keys()) | set(claim_pairs.keys())
         
-        logger.debug(f"[Stage4] 权重融合: 共现对={len(cooccur_pairs)}, 语义对={len(semantic_pairs)}, 论断对={len(claim_pairs)}, 合并后={len(all_pairs)}")
+        logger.debug(f"[Stage6] 权重融合: 共现对={len(cooccur_pairs)}, 语义对={len(semantic_pairs)}, 论断对={len(claim_pairs)}, 合并后={len(all_pairs)}")
         
         # 存储归一化权重（用于后续批量写入）
         normalized_weights = {}  # pair -> (cooccur_norm, semantic_norm, claim_norm, final_weight)
@@ -375,7 +367,7 @@ class ThemeBuilder:
             
             # 检查 pair 是否可哈希
             if not isinstance(pair, tuple):
-                logger.warning(f"[Stage4] pair 不是 tuple: {pair}({type(pair)}), 跳过")
+                logger.warning(f"[Stage6] pair 不是 tuple: {pair}({type(pair)}), 跳过")
                 continue
             
             # 归一化共现权重（对数归一化）
@@ -404,7 +396,7 @@ class ThemeBuilder:
                 # 保存归一化权重，避免后续重复计算
                 normalized_weights[pair] = (cooccur_norm, semantic_norm, claim_norm, final_weight)
             else:
-                logger.debug(f"[Stage4] 权重低于阈值跳过: ({c1_name}, {c2_name}), weight={final_weight:.4f} < {min_threshold}")
+                logger.debug(f"[Stage6] 权重低于阈值跳过: ({c1_name}, {c2_name}), weight={final_weight:.4f} < {min_threshold}")
         
         # 5. 对每个节点应用 top-k 限制
         logger.debug(f"应用 top-k 限制 (max_edges={max_edges})...")
@@ -492,46 +484,34 @@ class ThemeBuilder:
             louvain_config = self.thresholds.get("louvain", {})
             max_iterations = louvain_config.get("max_iterations", 50)
             tolerance = louvain_config.get("tolerance", 0.001)
+            resolution = louvain_config.get("resolution", 1.0)
             
-            query = f"""
-            CALL gds.louvain.stream('{graph_name}', {{
-                maxIterations: $max_iterations,
-                tolerance: $tolerance
-            }})
-            YIELD nodeId, communityId
-            RETURN nodeId, communityId
-            """
+            results = self._run_gds_louvain(graph_name, max_iterations, tolerance, resolution)
             
-            results = neo4j_client.execute_query(query, {
-                "max_iterations": max_iterations,
-                "tolerance": tolerance
-            })
-            
-            # 批量收集所有 nodeId
-            node_community_map = {}  # nodeId -> communityId
-            all_node_ids = []
+            communities = {}
             for record in results:
                 node_id = record.get("nodeId")
                 community_id = str(record.get("communityId"))
-                if node_id is not None:
-                    node_community_map[node_id] = community_id
-                    all_node_ids.append(node_id)
+                if node_id is not None and community_id is not None:
+                    if community_id not in communities:
+                        communities[community_id] = []
             
-            # 批量查询所有 Concept name（优化：避免N+1查询）
-            if all_node_ids:
-                concept_query = """
-                MATCH (c:Concept)
-                WHERE elementId(c) IN $node_ids
-                RETURN elementId(c) AS node_id, c.name AS name
-                """
-                concept_results = neo4j_client.execute_query(concept_query, {"node_ids": all_node_ids})
-                
-                # 建立映射
-                for record in concept_results:
-                    node_id = record.get("node_id")
+            name_query = """
+            UNWIND $mappings AS m
+            MATCH (n) WHERE id(n) = m.nodeId
+            RETURN m.nodeId AS node_id, m.communityId AS community_id, n.name AS name
+            """
+            mappings = [
+                {"nodeId": record.get("nodeId"), "communityId": str(record.get("communityId"))}
+                for record in results
+                if record.get("nodeId") is not None
+            ]
+            
+            if mappings:
+                name_results = neo4j_client.execute_query(name_query, {"mappings": mappings})
+                for record in name_results:
                     concept_name = record.get("name")
-                    community_id = node_community_map.get(node_id)
-                    
+                    community_id = record.get("community_id")
                     if concept_name and community_id:
                         if community_id not in communities:
                             communities[community_id] = []
@@ -546,37 +526,50 @@ class ThemeBuilder:
         
         return communities
     
-    def _detect_communities_simple(self, doc_id: str) -> Dict[str, List[str]]:
-        """简化社区检测（基于连通分量）"""
-        logger.debug("使用简化社区检测方法")
-        
-        # 使用弱连通分量（Weakly Connected Components）
-        query = """
-        MATCH (c:Concept)
-        WHERE EXISTS {
-            MATCH (c)-[:RELATED_TO]-(:Concept)
-        }
-        WITH collect(c) AS concepts
-        CALL apoc.path.subgraphNodes(concepts[0], {
-            relationshipFilter: 'RELATED_TO>',
-            minLevel: 0,
-            maxLevel: 2
-        })
-        YIELD node
-        RETURN node.name AS name
+    def _run_gds_louvain(self, graph_name: str, max_iterations: int = 50,
+                          tolerance: float = 0.001, resolution: float = 1.0) -> List[Dict]:
+        """执行 GDS Louvain 算法，自动兼容不同 GDS 版本"""
+        query_with_resolution = f"""
+        CALL gds.louvain.stream('{graph_name}', {{
+            maxIterations: $max_iterations,
+            tolerance: $tolerance,
+            resolution: $resolution
+        }})
+        YIELD nodeId, communityId
+        RETURN nodeId, communityId
+        """
+        query_without_resolution = f"""
+        CALL gds.louvain.stream('{graph_name}', {{
+            maxIterations: $max_iterations,
+            tolerance: $tolerance
+        }})
+        YIELD nodeId, communityId
+        RETURN nodeId, communityId
         """
         
-        # 如果 APOC 不可用，使用更简单的方法
         try:
-            results = neo4j_client.execute_query(query, {"doc_id": doc_id})
-            # 简化：将所有概念归为一个社区
-            all_concepts = [r.get("name") for r in results if r.get("name")]
-            if all_concepts:
-                return {"0": all_concepts}
+            return neo4j_client.execute_query(query_with_resolution, {
+                "max_iterations": max_iterations,
+                "tolerance": tolerance,
+                "resolution": resolution
+            })
         except Exception as e:
-            logger.warning(f"简化社区检测失败: {e}")
-        
-        # 最后的回退：基于 RELATED_TO 关系的概念分组
+            if "resolution" in str(e).lower() or "Unexpected configuration key" in str(e):
+                logger.debug(f"GDS 不支持 resolution 参数，使用默认值: {e}")
+                return neo4j_client.execute_query(query_without_resolution, {
+                    "max_iterations": max_iterations,
+                    "tolerance": tolerance
+                })
+            raise
+    
+    def _detect_communities_simple(self, doc_id: str) -> Dict[str, List[str]]:
+        """简化社区检测（GDS不可用时的回退方案）"""
+        logger.debug("使用简化社区检测方法")
+
+        if _NX_AVAILABLE:
+            return self._detect_communities_nx(doc_id)
+
+        logger.warning("NetworkX 不可用，使用最简回退方法（所有概念归为一个社区）")
         query = """
         MATCH (c1:Concept)-[:RELATED_TO]-(c2:Concept)
         WHERE c1 <> c2
@@ -591,10 +584,63 @@ class ThemeBuilder:
         """
         results = neo4j_client.execute_query(query, {"doc_id": doc_id})
         concepts = [r.get("name") for r in results if r.get("name")]
-        
+
         if concepts:
             return {"0": concepts}
         return {}
+
+    def _detect_communities_nx(self, doc_id: str) -> Dict[str, List[str]]:
+        """使用 NetworkX Louvain 算法进行社区检测（GDS回退方案）"""
+        logger.debug("使用 NetworkX Louvain 进行社区检测")
+
+        edges_query = """
+        MATCH (c1:Concept)-[r:RELATED_TO]-(c2:Concept)
+        WHERE c1.name < c2.name
+        RETURN c1.name AS source, c2.name AS target, COALESCE(r.weight, 1.0) AS weight
+        """
+        edges_results = neo4j_client.execute_query(edges_query, {"doc_id": doc_id})
+
+        if not edges_results:
+            isolated_query = """
+            MATCH (c:Concept)
+            RETURN c.name AS name
+            LIMIT 50
+            """
+            isolated_results = neo4j_client.execute_query(isolated_query, {"doc_id": doc_id})
+            concepts = [r.get("name") for r in isolated_results if r.get("name")]
+            if concepts:
+                return {"0": concepts}
+            return {}
+
+        G = nx.Graph()
+        for record in edges_results:
+            source = record.get("source")
+            target = record.get("target")
+            weight = float(record.get("weight", 1.0))
+            if source and target:
+                G.add_edge(source, target, weight=weight)
+
+        if G.number_of_nodes() == 0:
+            return {}
+
+        louvain_config = self.thresholds.get("louvain", {})
+        resolution = louvain_config.get("resolution", 1.0)
+        seed = louvain_config.get("random_seed", 42)
+
+        try:
+            communities_list = louvain_communities(G, weight="weight", resolution=resolution, seed=seed)
+        except Exception as e:
+            logger.warning(f"NetworkX Louvain 失败: {e}，使用连通分量")
+            communities_list = list(nx.connected_components(G))
+
+        communities: Dict[str, List[str]] = {}
+        for i, community_set in enumerate(communities_list):
+            members = [name for name in community_set if name]
+            if members:
+                communities[str(i)] = members
+
+        logger.info(f"NetworkX 社区检测完成: 发现 {len(communities)} 个社区")
+        return communities
     
     def _detect_multi_scale_communities(
         self,
@@ -623,7 +669,11 @@ class ThemeBuilder:
             logger.warning("Level 1 社区检测未发现任何社区")
             return []
         
-        logger.info(f"Level 1 检测完成: {len(level1_communities)} 个粗粒度主题")
+        valid_count = sum(
+            1 for members in level1_communities.values()
+            if len(members) >= self.thresholds.get("min_community_size", 3)
+        )
+        logger.info(f"Level 1 检测完成: {valid_count} 个有效粗粒度主题（原始 {len(level1_communities)} 个）")
         
         # 为 Level 1 主题创建 Theme 对象（批量处理）
         level1_themes = []
@@ -729,74 +779,67 @@ class ThemeBuilder:
             max_iterations = louvain_config.get("max_iterations", 50)
             tolerance = louvain_config.get("tolerance", 0.001)
             
-            query = f"""
-            CALL gds.louvain.stream('{graph_name}', {{
-                maxIterations: $max_iterations,
-                tolerance: $tolerance
-            }})
-            YIELD nodeId, communityId
-            RETURN nodeId, communityId
-            """
+            results = self._run_gds_louvain(graph_name, max_iterations, tolerance, level1_resolution)
             
-            results = neo4j_client.execute_query(query, {
-                "max_iterations": max_iterations,
-                "tolerance": tolerance
-            })
-            
-            # 批量收集所有 nodeId（优化：避免N+1查询）
-            node_community_map = {}  # nodeId -> communityId
-            all_node_ids = []
             for record in results:
                 node_id = record.get("nodeId")
                 community_id = str(record.get("communityId"))
-                if node_id is not None:
-                    node_community_map[node_id] = community_id
-                    all_node_ids.append(node_id)
+                if node_id is not None and community_id is not None:
+                    if community_id not in communities:
+                        communities[community_id] = []
             
-            # 批量查询所有 Concept name
-            if all_node_ids:
-                concept_query = """
-                MATCH (c:Concept)
-                WHERE elementId(c) IN $node_ids
-                RETURN elementId(c) AS node_id, c.name AS name
-                """
-                concept_results = neo4j_client.execute_query(concept_query, {"node_ids": all_node_ids})
-                
-                # 建立映射
-                for record in concept_results:
-                    node_id = record.get("node_id")
+            name_query = """
+            UNWIND $mappings AS m
+            MATCH (n) WHERE id(n) = m.nodeId
+            RETURN m.nodeId AS node_id, m.communityId AS community_id, n.name AS name
+            """
+            mappings = [
+                {"nodeId": record.get("nodeId"), "communityId": str(record.get("communityId"))}
+                for record in results
+                if record.get("nodeId") is not None
+            ]
+            
+            if mappings:
+                name_results = neo4j_client.execute_query(name_query, {"mappings": mappings})
+                for record in name_results:
                     concept_name = record.get("name")
-                    community_id = node_community_map.get(node_id)
-                    
+                    community_id = record.get("community_id")
                     if concept_name and community_id:
                         if community_id not in communities:
                             communities[community_id] = []
                         communities[community_id].append(concept_name)
             
-            # 验证主题数量限制
-            num_communities = len(communities)
-            if num_communities < min_themes:
+            # 验证主题数量限制（仅统计有效社区，过滤掉过小的碎片社区）
+            min_community_size = self.thresholds.get("min_community_size", 3)
+            valid_communities = {
+                cid: members for cid, members in communities.items()
+                if len(members) >= min_community_size
+            }
+            num_valid = len(valid_communities)
+            logger.debug(
+                f"Level 1 社区统计: 原始={len(communities)}, "
+                f"有效(>= {min_community_size} 成员)={num_valid}"
+            )
+            if num_valid < min_themes:
                 logger.warning(
-                    f"Level 1 主题数量 ({num_communities}) 少于最小值 ({min_themes})，"
-                    f"降低分辨率以增加主题数"
+                    f"Level 1 有效主题数量 ({num_valid}) 少于最小值 ({min_themes})，"
+                    f"提高分辨率以增加主题数"
                 )
-                # 降低分辨率（增加主题数）
-                adjusted_resolution = level1_resolution * 0.7
-                return self._detect_level1_communities_with_resolution(
-                    graph_name, doc_id, adjusted_resolution, min_themes, max_themes
-                )
-            elif num_communities > max_themes:
-                logger.warning(
-                    f"Level 1 主题数量 ({num_communities}) 超过最大值 ({max_themes})，"
-                    f"提高分辨率以减少主题数"
-                )
-                # 提高分辨率（减少主题数）
                 adjusted_resolution = level1_resolution * 1.5
                 return self._detect_level1_communities_with_resolution(
                     graph_name, doc_id, adjusted_resolution, min_themes, max_themes
                 )
+            elif num_valid > max_themes:
+                logger.warning(
+                    f"Level 1 有效主题数量 ({num_valid}) 超过最大值 ({max_themes})，"
+                    f"降低分辨率以减少主题数"
+                )
+                adjusted_resolution = level1_resolution * 0.7
+                return self._detect_level1_communities_with_resolution(
+                    graph_name, doc_id, adjusted_resolution, min_themes, max_themes
+                )
             
-            logger.info(f"Level 1 检测完成: {num_communities} 个社区")
+            logger.info(f"Level 1 检测完成: {num_valid} 个社区（原始 {len(communities)} 个）")
             
         except Exception as e:
             logger.warning(f"Level 1 GDS Louvain 算法失败，使用简化方法: {e}")
@@ -824,51 +867,47 @@ class ThemeBuilder:
                 max_iterations_inner = louvain_config.get("max_iterations", 50)
                 tolerance = louvain_config.get("tolerance", 0.001)
                 
-                query = f"""
-                CALL gds.louvain.stream('{graph_name}', {{
-                    maxIterations: $max_iterations,
-                    tolerance: $tolerance
-                }})
-                YIELD nodeId, communityId
-                RETURN nodeId, communityId
-                """
-                
-                results = neo4j_client.execute_query(query, {
-                    "max_iterations": max_iterations_inner,
-                    "tolerance": tolerance
-                })
+                results = self._run_gds_louvain(graph_name, max_iterations_inner, tolerance, resolution)
                 
                 for record in results:
                     node_id = record.get("nodeId")
                     community_id = str(record.get("communityId"))
                     
-                    concept_query = """
-                    MATCH (c:Concept)
-                    WHERE elementId(c) = $node_id
-                    RETURN c.name AS name
-                    """
-                    concept_results = neo4j_client.execute_query(concept_query, {"node_id": node_id})
+                    try:
+                        name_result = neo4j_client.execute_query(
+                            "MATCH (n) WHERE id(n) = $nodeId RETURN n.name AS name",
+                            {"nodeId": node_id}
+                        )
+                        concept_name = name_result[0].get("name") if name_result else None
+                    except Exception:
+                        concept_name = None
                     
-                    if concept_results:
-                        concept_name = concept_results[0].get("name")
-                        if concept_name:
-                            if community_id not in communities:
-                                communities[community_id] = []
-                            communities[community_id].append(concept_name)
+                    if concept_name:
+                        if community_id not in communities:
+                            communities[community_id] = []
+                        communities[community_id].append(concept_name)
                 
                 num_communities = len(communities)
+                min_community_size = self.thresholds.get("min_community_size", 3)
+                valid_communities = {
+                    cid: members for cid, members in communities.items()
+                    if len(members) >= min_community_size
+                }
+                num_valid = len(valid_communities)
+                logger.debug(
+                    f"Level 1 迭代 {iteration + 1}: resolution={resolution}, "
+                    f"原始社区={num_communities}, 有效社区(>= {min_community_size} 成员)={num_valid}"
+                )
                 
-                if min_themes <= num_communities <= max_themes:
-                    logger.info(f"Level 1 分辨率调整成功: resolution={resolution}, themes={num_communities}")
+                if min_themes <= num_valid <= max_themes:
+                    logger.info(f"Level 1 分辨率调整成功: resolution={resolution}, themes={num_valid}")
                     return communities
                 
                 # 继续调整分辨率
-                if num_communities < min_themes:
-                    resolution *= 0.7  # 降低分辨率，增加主题数
+                if num_valid < min_themes:
+                    resolution *= 1.5  # 提高分辨率，增加主题数
                 else:
-                    resolution *= 1.5  # 提高分辨率，减少主题数
-                
-                logger.debug(f"Level 1 迭代 {iteration + 1}: themes={num_communities}, new_resolution={resolution}")
+                    resolution *= 0.7  # 降低分辨率，减少主题数
                 
             except Exception as e:
                 logger.error(f"Level 1 分辨率调整失败: {e}")
@@ -922,7 +961,7 @@ class ThemeBuilder:
                 logger.warning("Level 2 子图投影：未找到节点")
                 return {}
             
-            # 创建子图投影（使用参数化查询传递节点ID）
+            # 创建子图投影（GDS Cypher 投影要求 id/source/target 为 Integer 类型，必须使用 id() 而非 elementId()）
             create_subgraph_query = """
             MATCH (c:Concept)
             WHERE elementId(c) IN $node_ids
@@ -937,9 +976,9 @@ class ThemeBuilder:
             WITH collect(DISTINCT n) AS final_nodes, collect(DISTINCT r) AS rels
             CALL gds.graph.project.cypher(
                 $subgraph_name,
-                'UNWIND $nodes AS id MATCH (c) WHERE elementId(c) = id RETURN elementId(c) AS id',
-                'UNWIND $rels AS id MATCH ()-[r]->() WHERE elementId(r) = id RETURN elementId(startNode(r)) AS source, elementId(endNode(r)) AS target, COALESCE(r.weight, 1.0) AS weight',
-                {parameters: {nodes: [x IN final_nodes | elementId(x)], rels: [r IN rels | elementId(r)]}}
+                'UNWIND $nodes AS id MATCH (c) WHERE id(c) = id RETURN id(c) AS id',
+                'UNWIND $rels AS id MATCH ()-[r]->() WHERE id(r) = id RETURN id(startNode(r)) AS source, id(endNode(r)) AS target, COALESCE(r.weight, 1.0) AS weight',
+                {parameters: {nodes: [x IN final_nodes | id(x)], rels: [r IN rels | id(r)]}}
             )
             YIELD graphName, nodeCount, relationshipCount
             RETURN graphName, nodeCount, relationshipCount
@@ -955,48 +994,34 @@ class ThemeBuilder:
             max_iterations = louvain_config.get("max_iterations", 50)
             tolerance = louvain_config.get("tolerance", 0.001)
             
-            query = f"""
-            CALL gds.louvain.stream('{subgraph_name}', {{
-                maxIterations: $max_iterations,
-                tolerance: $tolerance
-            }})
-            YIELD nodeId, communityId
-            RETURN nodeId, communityId
-            """
+            results = self._run_gds_louvain(subgraph_name, max_iterations, tolerance, level2_resolution)
             
-            results = neo4j_client.execute_query(query, {
-                "max_iterations": max_iterations,
-                "tolerance": tolerance
-            })
-            
-            # 批量收集所有 nodeId（优化：避免N+1查询）
-            node_community_map = {}  # nodeId -> communityId
-            all_node_ids = []
             for record in results:
                 node_id = record.get("nodeId")
                 community_id = str(record.get("communityId"))
-                if node_id is not None:
-                    node_community_map[node_id] = community_id
-                    all_node_ids.append(node_id)
+                if node_id is not None and community_id is not None:
+                    if community_id not in communities:
+                        communities[community_id] = []
             
-            # 批量查询所有 Concept name
-            if all_node_ids:
-                concept_query = """
-                MATCH (c:Concept)
-                WHERE elementId(c) IN $node_ids AND c.name IN $member_names
-                RETURN elementId(c) AS node_id, c.name AS name
-                """
-                concept_results = neo4j_client.execute_query(
-                    concept_query,
-                    {"node_ids": all_node_ids, "member_names": level1_members}
+            name_query = """
+            UNWIND $mappings AS m
+            MATCH (n) WHERE id(n) = m.nodeId AND n.name IN $member_names
+            RETURN m.nodeId AS node_id, m.communityId AS community_id, n.name AS name
+            """
+            mappings = [
+                {"nodeId": record.get("nodeId"), "communityId": str(record.get("communityId"))}
+                for record in results
+                if record.get("nodeId") is not None
+            ]
+            
+            if mappings:
+                name_results = neo4j_client.execute_query(
+                    name_query,
+                    {"mappings": mappings, "member_names": level1_members}
                 )
-                
-                # 建立映射
-                for record in concept_results:
-                    node_id = record.get("node_id")
+                for record in name_results:
                     concept_name = record.get("name")
-                    community_id = node_community_map.get(node_id)
-                    
+                    community_id = record.get("community_id")
                     if concept_name and community_id:
                         if community_id not in communities:
                             communities[community_id] = []
@@ -1005,39 +1030,116 @@ class ThemeBuilder:
             # 清理子图投影
             self._drop_graph(subgraph_name)
             
-            # 验证主题数量限制
+            # 验证主题数量限制（仅统计有效社区）
             num_communities = len(communities)
-            if num_communities < min_themes:
+            min_community_size = self.thresholds.get("min_community_size", 3)
+            valid_communities = {
+                cid: members for cid, members in communities.items()
+                if len(members) >= min_community_size
+            }
+            num_valid = len(valid_communities)
+            if num_valid < min_themes:
                 logger.debug(
-                    f"Level 2 主题数量 ({num_communities}) 少于最小值 ({min_themes})，"
+                    f"Level 2 有效主题数量 ({num_valid}) 少于最小值 ({min_themes})，"
                     f"跳过该 Level 1 主题的 Level 2 检测"
                 )
                 return {}
-            elif num_communities > max_themes:
+            elif num_valid > max_themes:
                 logger.warning(
-                    f"Level 2 主题数量 ({num_communities}) 超过最大值 ({max_themes})，"
+                    f"Level 2 有效主题数量 ({num_valid}) 超过最大值 ({max_themes})，"
                     f"仅保留前 {max_themes} 个最大的社区"
                 )
-                # 按社区大小排序，保留前 max_themes 个
-                sorted_communities = sorted(
-                    communities.items(),
+                sorted_valid = sorted(
+                    valid_communities.items(),
                     key=lambda x: len(x[1]),
                     reverse=True
                 )
-                communities = dict(sorted_communities[:max_themes])
+                communities = dict(sorted_valid[:max_themes])
+            else:
+                communities = valid_communities
             
-            logger.debug(f"Level 2 检测完成: {len(communities)} 个子社区")
+            logger.debug(f"Level 2 检测完成: {len(communities)} 个子社区（原始 {num_communities} 个）")
             
         except Exception as e:
             logger.warning(f"Level 2 GDS Louvain 算法失败: {e}")
-            # 如果子图投影失败，使用简化方法：将 Level 1 社区按概念数量平均分割
-            if len(level1_members) >= min_themes * 2:
-                chunk_size = len(level1_members) // min_themes
-                for i, chunk in enumerate([level1_members[j:j+chunk_size] for j in range(0, len(level1_members), chunk_size)]):
-                    if len(chunk) >= min_themes:
-                        communities[str(i)] = chunk
+            if _NX_AVAILABLE and len(level1_members) >= min_themes:
+                nx_communities = self._detect_level2_communities_nx(level1_members)
+                if nx_communities:
+                    communities = nx_communities
+                    logger.debug(f"Level 2 使用 NetworkX 回退: {len(communities)} 个子社区")
+                else:
+                    communities = self._simple_split_community(level1_members, min_themes)
+                    logger.debug(f"Level 2 使用简化分割: {len(communities)} 个子社区")
+            elif len(level1_members) >= min_themes * 2:
+                communities = self._simple_split_community(level1_members, min_themes)
                 logger.debug(f"Level 2 使用简化分割: {len(communities)} 个子社区")
         
+        return communities
+    
+    def _detect_level2_communities_nx(self, level1_members: List[str]) -> Dict[str, List[str]]:
+        """使用 NetworkX Louvain 对 Level 1 社区成员进行子社区检测"""
+        if not _NX_AVAILABLE or len(level1_members) < 2:
+            return {}
+
+        placeholders = ", ".join([f'"{name}"' for name in level1_members[:200]])
+        edges_query = f"""
+        MATCH (c1:Concept)-[r:RELATED_TO]-(c2:Concept)
+        WHERE c1.name IN [{placeholders}] AND c2.name IN [{placeholders}] AND c1.name < c2.name
+        RETURN c1.name AS source, c2.name AS target, COALESCE(r.weight, 1.0) AS weight
+        """
+        try:
+            edges_results = neo4j_client.execute_query(edges_query)
+        except Exception as e:
+            logger.warning(f"Level 2 NetworkX 边查询失败: {e}")
+            return {}
+
+        G = nx.Graph()
+        for name in level1_members:
+            G.add_node(name)
+        for record in edges_results:
+            source = record.get("source")
+            target = record.get("target")
+            weight = float(record.get("weight", 1.0))
+            if source and target:
+                G.add_edge(source, target, weight=weight)
+
+        if G.number_of_edges() == 0:
+            return {}
+
+        louvain_config = self.thresholds.get("louvain", {})
+        level2_config = self.thresholds.get("multi_scale", {})
+        resolution = level2_config.get("level2_resolution", louvain_config.get("resolution", 1.5))
+        seed = louvain_config.get("random_seed", 42)
+
+        try:
+            communities_list = louvain_communities(G, weight="weight", resolution=resolution, seed=seed)
+        except Exception as e:
+            logger.warning(f"Level 2 NetworkX Louvain 失败: {e}，使用连通分量")
+            communities_list = list(nx.connected_components(G))
+
+        communities: Dict[str, List[str]] = {}
+        for i, community_set in enumerate(communities_list):
+            members = [name for name in community_set if name in set(level1_members)]
+            if len(members) >= 2:
+                communities[str(i)] = members
+
+        return communities
+
+    def _simple_split_community(self, members: List[str], min_size: int) -> Dict[str, List[str]]:
+        """将成员列表按动态块数分割"""
+        n = len(members)
+        target_community_size = max(min_size, 5)
+        num_chunks = max(2, min(n // target_community_size, 8))
+        chunk_size = n // num_chunks
+
+        if chunk_size < min_size:
+            return {"0": members}
+
+        communities: Dict[str, List[str]] = {}
+        for i, chunk in enumerate([members[j:j + chunk_size] for j in range(0, n, chunk_size)]):
+            if len(chunk) >= min_size:
+                communities[str(i)] = chunk
+
         return communities
     
     def _batch_create_themes(

@@ -15,6 +15,10 @@ standard:
   - CONTAINS
   - BELONGS_TO
   - RELATION
+  - USES
+  - IMPLEMENTS
+  - COMPARES_WITH
+  - DEPENDS_ON
 
 # 自然语言谓词映射到标准谓词
 mappings:
@@ -68,6 +72,22 @@ mappings:
   # CONTAINS 映射
   "包含": CONTAINS
   "含有": CONTAINS
+
+  # USES 映射
+  "使用": USES
+  "采用": USES
+
+  # IMPLEMENTS 映射
+  "实现": IMPLEMENTS
+  "实现了": IMPLEMENTS
+
+  # COMPARES_WITH 映射
+  "比较": COMPARES_WITH
+  "对比": COMPARES_WITH
+
+  # DEPENDS_ON 映射
+  "依赖": DEPENDS_ON
+  "依赖于": DEPENDS_ON
 
 # 类型约束白名单
 type_constraints:
@@ -134,6 +154,22 @@ type_constraints:
   - source: Concept
     predicate: RELATION
     target: [Concept, Claim]
+
+  - source: Concept
+    predicate: USES
+    target: [Concept]
+
+  - source: Concept
+    predicate: IMPLEMENTS
+    target: [Concept]
+
+  - source: Concept
+    predicate: COMPARES_WITH
+    target: [Concept]
+
+  - source: Concept
+    predicate: DEPENDS_ON
+    target: [Concept]
 
 # 未匹配谓词处理策略
 unmatched_strategy:

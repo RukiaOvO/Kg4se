@@ -28,7 +28,7 @@ class GraphRAGPipelineService:
     """
     GraphRAG Pipeline 服务
     
-    封装八阶段知识图谱构建流水线，提供统一的文档处理接口
+    封装九阶段知识图谱构建流水线，提供统一的文档处理接口
     """
     
     _instance = None
@@ -56,14 +56,14 @@ class GraphRAGPipelineService:
         """初始化 Pipeline"""
         config = PipelineConfig(
             enable_stage0=False,
-            enable_stage7=False,
-            enable_stage8=True,
+            enable_stage8=False,
+            enable_stage7=True,
             concurrency_limit=5,
             batch_size=10,
             min_confidence=0.6,
             enable_nli_verification=True,
             enable_domain_filter=True,
-            stages_to_run=[1, 2, 3, 4, 5, 6, 8]
+            stages_to_run=[1, 2, 3, 4, 5, 6, 7]
         )
         
         self._pipeline = GraphRAGPipeline(config)

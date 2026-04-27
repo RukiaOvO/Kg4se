@@ -1,5 +1,5 @@
 """
-阶段 7: GraphRAG 检索 (Query Service) - P1 实现
+阶段 8: GraphRAG 检索 (Query Service) - P1 实现
 
 实现多路候选生成、图先验协同、限域生成
 支持三种问答模式：llm_only, rag, graphrag
@@ -16,7 +16,7 @@ from graphrag.utils.embedding import get_embedding, cosine_similarity
 from graphrag.models.claim import Claim
 from graphrag.models.theme import Theme
 
-logger = logging.getLogger("graphrag.stage7")
+logger = logging.getLogger("graphrag.stage8")
 
 
 @dataclass
