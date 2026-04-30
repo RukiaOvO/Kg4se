@@ -426,6 +426,7 @@ const skeletonNodeCount = ref(10)
 const documentDepth = ref(2)
 const currentDocumentId = ref<string | null>(null)
 const documentOptions = ref<Array<{ label: string; value: string; meta?: any }>>([])
+let graphAbortController: AbortController | null = null
 const search = useDebounceFn(async (keyword: string) => {
   const results = await api.search(keyword)
   // 处理结果
@@ -503,15 +504,21 @@ const handleDocumentChange = async (value: string | null) => {
 const loadGraph = async () => {
   loading.value = true
   try {
+    graphAbortController?.abort()
+    graphAbortController = new AbortController()
+    const { signal } = graphAbortController
+
     // 优先使用路由中的 doc_id 过滤，默认加载全量图谱
     const routeDocId = (route.query.doc_id as string) || null
     currentDocumentId.value = currentDocumentId.value || routeDocId
     const docId = currentDocumentId.value
 
     const result = docId
-      ? await getDocumentGraph(docId, documentDepth.value, nodeLimit.value)
-      : await getGraphData(nodeLimit.value)
+      ? await getDocumentGraph(docId, documentDepth.value, nodeLimit.value, signal)
+      : await getGraphData(nodeLimit.value, signal)
     
+    if (signal.aborted) return
+
     if (!result) {
       message.warning(t('graph.no_data'))
       return
@@ -664,6 +671,7 @@ const loadGraph = async () => {
     renderGraph()
     message.success(t('graph.loaded', { nodes: nodes.length, edges: edges.length }))
   } catch (error: any) {
+    if (error?.name === 'AbortError' || error?.code === 'ERR_CANCELED') return
     message.error(t('common.error'))
     console.error('Failed to load graph:', error)
   } finally {
@@ -693,7 +701,7 @@ const renderGraph = () => {
     rankDir: 'TB',
     spacingFactor: isHugeGraph ? 1.0 : isLargeGraph ? 1.2 : 1.5,
     animate: !isLargeGraph,
-    animationDuration: 300,
+    animationDuration: isLargeGraph ? 100 : 300,
     randomize: false
   }
 
@@ -730,7 +738,7 @@ const renderGraph = () => {
     'width': edgeWidth,
     'line-color': '#cbd5e1',
     'target-arrow-color': '#cbd5e1',
-    'target-arrow-shape': 'triangle',
+    'target-arrow-shape': isLargeGraph ? 'none' : 'triangle',
     'curve-style': isHugeGraph ? 'straight' : 'bezier',
     'label': 'data(label)',
     'font-size': isHugeGraph ? '7px' : '9px',
@@ -739,6 +747,11 @@ const renderGraph = () => {
     'text-background-padding': '2px',
     'text-opacity': 0,
     'text-rotation': 'autorotate'
+  }
+
+  if (isLargeGraph) {
+    edgeStyle['arrow-scale'] = 0
+    edgeStyle['line-opacity'] = 0.6
   }
 
   cy = cytoscape({
@@ -820,13 +833,34 @@ const renderGraph = () => {
         }
       }
     ] as any),
-    layout: layoutConfig as any
+    layout: layoutConfig as any,
+    pixelRatio: isHugeGraph ? 1 : isLargeGraph ? Math.max(1, window.devicePixelRatio / 2) : 'auto',
+    hideEdgesOnViewport: isLargeGraph,
+    motionBlur: !isLargeGraph,
+    textureOnViewport: !isLargeGraph,
+    wheelSensitivity: isLargeGraph ? 0.2 : 0.3,
+    minZoom: isHugeGraph ? 0.1 : isLargeGraph ? 0.05 : 0.02,
+    maxZoom: isLargeGraph ? 3 : 8,
+    boxSelectionEnabled: false,
+    selectionType: 'single'
   })
 
   updateLabelsByZoom()
 
+  let _zoomFrameId = 0
+  let _zoomThrottleMs = isLargeGraph ? 150 : 50
+  let _lastZoomUpdate = 0
+
   cy.on('viewport', () => {
-    requestAnimationFrame(() => updateLabelsByZoom())
+    if (!isLargeGraph) {
+      requestAnimationFrame(() => updateLabelsByZoom())
+      return
+    }
+    const now = performance.now()
+    if (now - _lastZoomUpdate < _zoomThrottleMs) return
+    _lastZoomUpdate = now
+    cancelAnimationFrame(_zoomFrameId)
+    _zoomFrameId = requestAnimationFrame(() => updateLabelsByZoom())
   })
 
   cy.on('tap', 'node', (evt: any) => {

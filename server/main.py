@@ -16,6 +16,7 @@ logger = get_logger("main")
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from routes import upload, ingest, graph, settings, knowledge_card, qa, evaluation
 from infra.neo4j_client import neo4j_client
 from config import settings as config_settings
@@ -83,6 +84,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# GZip compression for large responses (graph visualization, etc.)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Include routers
 app.include_router(upload.router)

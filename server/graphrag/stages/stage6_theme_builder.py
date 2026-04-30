@@ -117,45 +117,64 @@ class ThemeBuilder:
         return themes
     
     def _create_concept_graph(self, graph_name: str, doc_id: str):
-        """创建概念关系图投影（用于 GDS 算法）- 带权多源关系融合"""
+        """创建概念关系图投影（用于 GDS 算法）- 仅包含当前文档的 Concept"""
         logger.debug(f"创建概念图投影: {graph_name}")
-        
+
         try:
             # 如果图已存在，先删除
             self._drop_graph(graph_name)
-            
+
             # 1. 计算并创建带权的 RELATED_TO 关系
             self._build_weighted_relations(doc_id)
-            
-            # 2. 使用 GDS 投影 RELATED_TO 关系
+
+            # 2. 使用 GDS Cypher 投影，只包含当前文档可达的 Concept
+            # GDS project.cypher 的 node/edge 查询在其自身作用域内执行，
+            # 不能直接引用外层 Cypher 的 $doc_id 参数，因此通过 Python 插值传入
+
+            node_cypher = (
+                "MATCH (c:Concept) "
+                "WHERE EXISTS { "
+                f"  MATCH (c)<-[:MENTIONS]-(:Chunk {{doc_id: '{doc_id}'}}) "
+                "} "
+                "RETURN id(c) AS id"
+            )
+            edge_cypher = (
+                "MATCH (c1:Concept)-[r:RELATED_TO]-(c2:Concept) "
+                "WHERE EXISTS { "
+                f"  MATCH (c1)<-[:MENTIONS]-(:Chunk {{doc_id: '{doc_id}'}}) "
+                "} "
+                "AND EXISTS { "
+                f"  MATCH (c2)<-[:MENTIONS]-(:Chunk {{doc_id: '{doc_id}'}}) "
+                "} "
+                "AND c1 <> c2 "
+                "RETURN id(c1) AS source, id(c2) AS target, COALESCE(r.weight, 1.0) AS weight"
+            )
+
             query = f"""
-            CALL gds.graph.project(
-                '{graph_name}',
-                'Concept',
-                {{
-                    RELATED_TO: {{
-                        type: 'RELATED_TO',
-                        orientation: 'UNDIRECTED',
-                        properties: {{
-                            weight: {{
-                                property: 'weight',
-                                defaultValue: 1.0
-                            }}
-                        }}
-                    }}
-                }}
+            CALL gds.graph.project.cypher(
+                $graph_name,
+                "{node_cypher}",
+                "{edge_cypher}"
             )
             YIELD graphName, nodeCount, relationshipCount
             """
-            
+
             logger.debug(f"[Stage6] 执行 GDS 投影查询, doc_id={doc_id}")
             try:
-                result = neo4j_client.execute_query(query, {"doc_id": doc_id})
+                result = neo4j_client.execute_query(query, {
+                    "graph_name": graph_name
+                })
                 logger.debug(f"[Stage6] GDS 投影查询返回: {result}")
-                logger.debug(f"GDS 图投影创建成功: {graph_name}")
+                if result:
+                    logger.info(
+                        f"GDS 图投影创建成功: {result[0].get('graphName', graph_name)}, "
+                        f"节点={result[0].get('nodeCount', '?')}, "
+                        f"边={result[0].get('relationshipCount', '?')}"
+                    )
+                else:
+                    logger.debug(f"GDS 图投影创建成功: {graph_name}")
             except Exception as e:
                 logger.warning(f"GDS 投影失败，使用简化方法: {e}")
-                # 简化方法：直接在查询时使用 RELATED_TO 关系
         except Exception as e:
             import traceback
             logger.error(f"创建概念图失败: {e}")

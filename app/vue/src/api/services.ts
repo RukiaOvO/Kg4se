@@ -244,31 +244,37 @@ export const deleteDocument = (documentId: string): Promise<void> =>
   api.delete(`/uploads/${documentId}`)
 
 // Graph
-export const getGraphData = (limit: number = 500): Promise<any> =>
+export const getGraphData = (limit: number = 500, signal?: AbortSignal): Promise<any> =>
   api.get('/graph/visualize', {
     params: {
       limit,
       edge_limit: Math.min(limit * 10, 100000)
-    }
+    },
+    timeout: 120000,
+    signal
   })
 
-export const getGraphDataByType = (nodeType: string, limit: number = 500): Promise<any> =>
+export const getGraphDataByType = (nodeType: string, limit: number = 500, signal?: AbortSignal): Promise<any> =>
   api.get('/graph/visualize', {
     params: {
       limit,
       edge_limit: Math.min(limit * 10, 100000),
       node_type: nodeType
-    }
+    },
+    timeout: 120000,
+    signal
   })
 
 // Graph by document
-export const getDocumentGraph = (documentId: string, depth: number = 2, limit: number = 500): Promise<any> =>
+export const getDocumentGraph = (documentId: string, depth: number = 2, limit: number = 500, signal?: AbortSignal): Promise<any> =>
   api.get(`/graph/documents/${documentId}/graph`, {
     params: {
       depth: Math.max(1, Math.min(depth, 5)),
       limit,
       edge_limit: Math.min(limit * 10, 100000)
-    }
+    },
+    timeout: 120000,
+    signal
   })
 
 // Query

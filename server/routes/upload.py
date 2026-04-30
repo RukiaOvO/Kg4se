@@ -457,16 +457,62 @@ async def delete_document(document_id: str):
 
         file_path = meta.get("path")
 
-        # 从 Neo4j 删除文档及其所有关联节点
+        # ==========================================
+        # 级联删除：按依赖顺序删除，保护共享节点
+        # ==========================================
+
+        # Step 1: 删除所有 Chunk（DETACH DELETE 同时删除 Chunk 的所有关系）
+        chunk_query = """
+        MATCH (d:Document {id: $doc_id})-[:CONTAINS]->(c:Chunk)
+        DETACH DELETE c
+        RETURN count(c) AS deleted_chunks
+        """
+        chunk_result = neo4j_client.execute_query(chunk_query, {"doc_id": document_id})
+        deleted_chunks = chunk_result[0]["deleted_chunks"] if chunk_result else 0
+
+        # Step 2: 删除所有 Claim（doc_id 唯一归属此文档）
+        claim_query = """
+        MATCH (claim:Claim {doc_id: $doc_id})
+        DETACH DELETE claim
+        RETURN count(claim) AS deleted_claims
+        """
+        claim_result = neo4j_client.execute_query(claim_query, {"doc_id": document_id})
+        deleted_claims = claim_result[0]["deleted_claims"] if claim_result else 0
+
+        # Step 3: 删除孤儿 Concept（不再被任何 Chunk MENTIONS 的 Concept）
+        # 只删除被本文档独占的 Concept，多文档共享的 Concept 不受影响
+        orphan_concept_query = """
+        MATCH (concept:Concept)
+        WHERE NOT EXISTS { (:Chunk)-[:MENTIONS]->(concept) }
+        DETACH DELETE concept
+        RETURN count(concept) AS deleted_concepts
+        """
+        concept_result = neo4j_client.execute_query(orphan_concept_query, {"doc_id": document_id})
+        deleted_concepts = concept_result[0]["deleted_concepts"] if concept_result else 0
+
+        # Step 4: 删除孤儿 Theme（不再被任何节点 BELONGS_TO_THEME 的 Theme）
+        orphan_theme_query = """
+        MATCH (theme:Theme)
+        WHERE NOT EXISTS { ()-[:BELONGS_TO_THEME]->(theme) }
+        DETACH DELETE theme
+        RETURN count(theme) AS deleted_themes
+        """
+        theme_result = neo4j_client.execute_query(orphan_theme_query, {"doc_id": document_id})
+        deleted_themes = theme_result[0]["deleted_themes"] if theme_result else 0
+
+        # Step 5: 最后删除 Document 节点本身
         delete_query = """
         MATCH (d:Document {id: $doc_id})
-        OPTIONAL MATCH (d)-[r]-()
-        WITH d, r
         DETACH DELETE d
-        RETURN count(d) as deleted
+        RETURN count(d) AS deleted
         """
-
         neo4j_client.execute_query(delete_query, {"doc_id": document_id})
+
+        print(
+            f"Document {document_id} deleted: "
+            f"{deleted_chunks} chunks, {deleted_claims} claims, "
+            f"{deleted_concepts} orphan concepts, {deleted_themes} orphan themes"
+        )
 
         # 删除物理文件
         if file_path and Path(file_path).exists():

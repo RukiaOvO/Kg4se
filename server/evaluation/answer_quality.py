@@ -335,6 +335,11 @@ class PointwiseEvaluator:
                     logger.warning(f"评分字段 {field} 值异常: {val}，将限制在1-5范围内")
                     result[field] = max(1, min(5, float(val) if isinstance(val, (int, float)) else 3))
             
+            overall_val = result.get("overall", 0)
+            if not isinstance(overall_val, (int, float)) or overall_val < 1 or overall_val > 5:
+                logger.warning(f"评分字段 overall 值异常: {overall_val}，将限制在1-5范围内")
+                result["overall"] = max(1.0, min(5.0, float(overall_val) if isinstance(overall_val, (int, float)) else 3.0))
+            
             logger.info(f"[评估] LLM返回评分: accuracy={result['accuracy']}, completeness={result['completeness']}, relevance={result['relevance']}, expertise={result['expertise']}, explainability={result['explainability']}, overall={result['overall']}")
             
             return result
@@ -419,14 +424,14 @@ class PointwiseEvaluator:
 {predicted}
 
 # 输出格式
-请严格按照以下JSON格式输出，不要添加任何其他内容（注意：评分必须是1-5之间的整数）：
+请严格按照以下JSON格式输出，不要添加任何其他内容（注意：accuracy/completeness/relevance/expertise/explainability必须是1-5之间的整数；overall为前述五个维度评分的平均值，允许最多保留一位小数）：
 {{
     "accuracy": 3,
     "completeness": 3,
     "relevance": 3,
     "expertise": 3,
     "explainability": 3,
-    "overall": 3,
+    "overall": 3.0,
     "comment": "简短评语（不超过50字）"
 }}
 """
@@ -443,8 +448,7 @@ class PointwiseEvaluator:
             values = [s[dim] for s in samples]
             aggregated[dim] = round(sum(values) / len(values), 2)
         
-        overall_values = [s["overall"] for s in samples]
-        aggregated["overall"] = round(sum(overall_values) / len(overall_values), 2)
+        aggregated["overall"] = round(sum(aggregated[dim] for dim in dimensions) / len(dimensions), 2)
         aggregated["comment"] = f"基于 {len(samples)} 次评估的平均结果"
         aggregated["sample_std"] = {dim: round(np.std([s[dim] for s in samples]), 2) for dim in dimensions}
         

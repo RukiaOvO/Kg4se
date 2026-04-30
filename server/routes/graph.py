@@ -15,15 +15,38 @@ def _clean_properties(props: Dict[str, Any]) -> Dict[str, Any]:
     clean_props = {}
     for k, v in props.items():
         if hasattr(v, 'isoformat'):
-            # Python datetime/date/time objects
             clean_props[k] = v.isoformat()
         elif hasattr(v, 'to_native'):
-            # Neo4j DateTime objects
             native_val = v.to_native()
             clean_props[k] = native_val.isoformat() if hasattr(native_val, 'isoformat') else str(v)
         else:
             clean_props[k] = v
     return clean_props
+
+
+_VIZ_KEEP_KEYS = {
+    'id', 'name', 'label', 'filename', 'kind', 'domain', 'type',
+    'chunk_index', 'chunk_id', 'doc_id', 'source_id',
+    'created_at', 'updated_at', 'processing_status',
+    'text', 'summary', 'keywords', 'confidence',
+    'page', 'offset', 'evidence', 'weight',
+    'size', 'mime', 'checksum',
+}
+
+
+def _slim_properties(props: Dict[str, Any]) -> Dict[str, Any]:
+    """Reduce property payload for visualization: keep only essential keys, truncate long strings."""
+    slim = {}
+    for k, v in props.items():
+        if k not in _VIZ_KEEP_KEYS:
+            continue
+        if v is None:
+            continue
+        if isinstance(v, str) and len(v) > 200:
+            slim[k] = v[:200]
+        else:
+            slim[k] = v
+    return slim
 
 
 @router.get("/visualize")
@@ -122,7 +145,7 @@ async def visualize_graph(
                     "labels": labels,
                     "type": labels[0] if labels else "Unknown",
                     "label": node_props.get("label") or node_props.get("name") or node_props.get("filename") or (f"Chunk #{node_props['chunk_index']}" if node_props.get("chunk_index") is not None else None) or (node_props.get("summary", "")[:30] if node_props.get("summary") else node_id),
-                    "properties": node_props,
+                    "properties": _slim_properties(node_props),
                     "degree": 0
                 }
         
@@ -186,7 +209,7 @@ async def visualize_graph(
                                     "target": target_id,
                                     "type": rel_type,
                                     "label": rel_type,
-                                    "properties": rel_props
+                                    "properties": _slim_properties(rel_props)
                                 })
                                 
                                 if source_id in nodes_dict:
@@ -533,7 +556,7 @@ async def get_document_graph(
                 "labels": labels,
                 "type": labels[0] if labels else "Unknown",
                 "label": node_props.get("label") or node_props.get("name") or node_props.get("filename") or (f"Chunk #{node_props['chunk_index']}" if node_props.get("chunk_index") is not None else None) or node_id,
-                "properties": node_props,
+                "properties": _slim_properties(node_props),
                 "degree": 0
             }
     
@@ -597,7 +620,7 @@ async def get_document_graph(
                                 "target": target_id,
                                 "type": rel_type,
                                 "label": rel_type,
-                                "properties": rel_props
+                                "properties": _slim_properties(rel_props)
                             })
                             
                             # Update degree counts
