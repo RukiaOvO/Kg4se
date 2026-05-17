@@ -533,22 +533,48 @@ class PairwiseEvaluator:
         try:
             response = self.judge_model.chat(prompt)
             if not response or not response.strip():
-                raise ValueError("LLM返回空响应")
+                logger.warning("[Pairwise] LLM返回空响应，使用默认比较结果")
+                return self._get_default_comparison(name_a, name_b)
             
-            result = json.loads(response)
+            result = self._extract_json(response)
+            if result is None:
+                logger.warning(f"[Pairwise] JSON解析失败，LLM返回内容: {response[:300]}...")
+                return self._get_default_comparison(name_a, name_b)
             
             required_fields = ["scores", "winner", "reasoning"]
             for field in required_fields:
                 if field not in result:
-                    raise ValueError(f"缺少字段: {field}")
+                    logger.warning(f"[Pairwise] 缺少字段: {field}")
+                    return self._get_default_comparison(name_a, name_b)
             
+            logger.info(f"[Pairwise] 比较完成: {name_a} vs {name_b}, winner={result.get('winner')}")
             return result
+        except Exception as e:
+            logger.error(f"[Pairwise] 比较异常: {e}")
+            return self._get_default_comparison(name_a, name_b)
+    
+    def _extract_json(self, text: str):
+        """从LLM响应中提取JSON，支持markdown代码块包裹的情况"""
+        import re
+        
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text, re.DOTALL)
+        if json_match:
+            try:
+                return json.loads(json_match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+        
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if json_match:
+            try:
+                return json.loads(json_match.group(0))
+            except json.JSONDecodeError:
+                pass
+        
+        try:
+            return json.loads(text)
         except json.JSONDecodeError:
-            return self._get_default_comparison(name_a, name_b)
-        except ValueError:
-            return self._get_default_comparison(name_a, name_b)
-        except Exception:
-            return self._get_default_comparison(name_a, name_b)
+            return None
     
     def _build_pairwise_prompt(self, 
                               question: str, 
@@ -645,11 +671,11 @@ class PairwiseEvaluator:
             agg_scores[name_a][dim] = round(sum(scores_a) / len(scores_a), 2)
             agg_scores[name_b][dim] = round(sum(scores_b) / len(scores_b), 2)
         
-        # 确定最终胜负
-        winners = [r["winner"] for r in results]
-        a_wins = winners.count(name_a)
-        b_wins = winners.count(name_b)
-        ties = winners.count("tie")
+        # 确定最终胜负 - 使用大小写不敏感匹配增强鲁棒性
+        winners_lower = [r["winner"].strip().lower() for r in results]
+        a_wins = winners_lower.count(name_a.lower())
+        b_wins = winners_lower.count(name_b.lower())
+        ties = winners_lower.count("tie")
         
         if a_wins > b_wins:
             final_winner = name_a
@@ -658,9 +684,13 @@ class PairwiseEvaluator:
         else:
             final_winner = "tie"
         
-        # 聚合推理
-        reasonings = [r["reasoning"] for r in results]
-        combined_reasoning = "; ".join(reasonings)[:200]
+        # 聚合推理 - 不再截断，保留完整理由
+        reasonings = [r.get("reasoning", "") for r in results]
+        combined_reasoning = "; ".join([r for r in reasonings if r.strip()])
+        if not combined_reasoning:
+            combined_reasoning = "（无可用的评判理由）"
+
+        logger.info(f"[Pairwise] 聚合: name_a={name_a} a_wins={a_wins}, name_b={name_b} b_wins={b_wins}, ties={ties}, final_winner={final_winner}")
         
         return {
             "scores": agg_scores,

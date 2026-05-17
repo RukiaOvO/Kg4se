@@ -279,6 +279,61 @@
 
               <n-divider />
 
+              <div v-if="answerEvaluation.pairwise" class="pairwise-section">
+                <div class="section-title">
+                  <n-icon size="20"><trophy-outline /></n-icon>
+                  <h4>Pairwise 成对比较（位置交换策略）</h4>
+                  <div class="pairwise-subtitle">四维度评估：准确性、全面性、逻辑连贯性、有用性</div>
+                </div>
+                <div class="pairwise-grid">
+                  <div
+                    v-for="pair in pairwiseComparisons"
+                    :key="pair.key"
+                    class="pairwise-card"
+                    :class="getPairwiseWinnerClass(pair.result)"
+                  >
+                    <div class="pairwise-card-header">
+                      <span class="pairwise-vs">{{ pair.labelA }}</span>
+                      <span class="pairwise-vs-divider">VS</span>
+                      <span class="pairwise-vs">{{ pair.labelB }}</span>
+                    </div>
+                    <div class="pairwise-winner">
+                      <n-tag :type="getPairwiseTagType(pair.result.winner, pair.keyA, pair.keyB)" size="large" round>
+                        {{ getPairwiseWinnerLabel(pair.result.winner, pair.keyA, pair.keyB, pair.labelA, pair.labelB) }}
+                      </n-tag>
+                    </div>
+                    <div class="pairwise-scores-row" v-if="pair.result.scores">
+                      <div class="pairwise-model-scores" v-for="modelName in [pair.keyA, pair.keyB]" :key="modelName">
+                        <div class="pairwise-model-name">{{ modelName }}</div>
+                        <div class="pairwise-dim-bars">
+                          <div class="pairwise-dim-bar" v-for="dim in pairwiseDimensions" :key="dim.key">
+                            <span class="pairwise-dim-label">{{ dim.label }}</span>
+                            <div class="pairwise-bar-track">
+                              <div
+                                class="pairwise-bar-fill"
+                                :style="{
+                                  width: ((pair.result.scores[modelName]?.[dim.key] || 0) / 5 * 100) + '%',
+                                  backgroundColor: dim.color
+                                }"
+                              ></div>
+                            </div>
+                            <span class="pairwise-dim-value">{{ pair.result.scores[modelName]?.[dim.key] || '-' }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="pairwise-reasoning" v-if="pair.result.reasoning">
+                      <span class="pairwise-reasoning-label">评判理由：</span>
+                      <n-scrollbar style="max-height: 120px;">
+                        <div class="pairwise-reasoning-text">{{ pair.result.reasoning }}</div>
+                      </n-scrollbar>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <n-divider />
+
               <div class="answers-section">
                 <div class="section-title">
                   <n-icon size="20"><document-text-outline /></n-icon>
@@ -288,7 +343,13 @@
                   <div class="answer-card graphrag">
                     <div class="answer-header">
                       <n-tag type="success" bordered>GraphRAG</n-tag>
-                      <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.graphrag_score * 100).toFixed(1) }}</span>
+                      <div class="header-metrics">
+                        <span class="time-badge" v-if="answerEvaluation.timing">
+                          <n-icon size="14"><time-outline /></n-icon>
+                          {{ answerEvaluation.timing.graphrag_gen_time }}s
+                        </span>
+                        <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.graphrag_score * 100).toFixed(1) }}</span>
+                      </div>
                     </div>
                     <div class="answer-content markdown-content">
                       <Markdown :source="answerEvaluation.graphrag_answer" />
@@ -298,7 +359,13 @@
                   <div class="answer-card rag">
                     <div class="answer-header">
                       <n-tag type="warning" bordered>RAG</n-tag>
-                      <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.rag_score * 100).toFixed(1) }}</span>
+                      <div class="header-metrics">
+                        <span class="time-badge" v-if="answerEvaluation.timing">
+                          <n-icon size="14"><time-outline /></n-icon>
+                          {{ answerEvaluation.timing.rag_gen_time }}s
+                        </span>
+                        <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.rag_score * 100).toFixed(1) }}</span>
+                      </div>
                     </div>
                     <div class="answer-content markdown-content">
                       <Markdown :source="answerEvaluation.rag_answer" />
@@ -308,7 +375,13 @@
                   <div class="answer-card llm">
                     <div class="answer-header">
                       <n-tag type="info" bordered>LLM</n-tag>
-                      <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.llm_score * 100).toFixed(1) }}</span>
+                      <div class="header-metrics">
+                        <span class="time-badge" v-if="answerEvaluation.timing">
+                          <n-icon size="14"><time-outline /></n-icon>
+                          {{ answerEvaluation.timing.llm_gen_time }}s
+                        </span>
+                        <span class="score-badge">{{ (answerEvaluation.evaluation.statistics.llm_score * 100).toFixed(1) }}</span>
+                      </div>
                     </div>
                     <div class="answer-content markdown-content">
                       <Markdown :source="answerEvaluation.llm_answer" />
@@ -414,7 +487,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { NButton, NIcon, NInput, NTabs, NTabPane, NSpin, NEmpty, NTag, NScrollbar, NDivider, NAlert } from 'naive-ui'
-import { DocumentTextOutline, SendOutline, GitNetworkOutline, AnalyticsOutline } from '@vicons/ionicons5'
+import { DocumentTextOutline, SendOutline, GitNetworkOutline, AnalyticsOutline, TimeOutline, TrophyOutline } from '@vicons/ionicons5'
 import { evaluateAnswerQuality } from '@/api/services'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
@@ -580,6 +653,43 @@ const scoreScaleList = [
   { score: '2', level: '较差', desc: '部分符合要求', color: '#ff7a45' },
   { score: '1', level: '差', desc: '不符合要求', color: '#ff4d4f' }
 ]
+
+const pairwiseDimensions = [
+  { key: 'accuracy', label: '准确性', color: '#52c41a' },
+  { key: 'comprehensiveness', label: '全面性', color: '#1890ff' },
+  { key: 'coherence', label: '逻辑连贯', color: '#722ed1' },
+  { key: 'helpfulness', label: '有用性', color: '#fa8c16' }
+]
+
+const pairwiseComparisons = computed(() => {
+  if (!answerEvaluation.value?.pairwise) return []
+  const pw = answerEvaluation.value.pairwise
+  return [
+    { key: 'graphrag_vs_rag', keyA: 'GraphRAG', keyB: 'RAG', labelA: 'GraphRAG', labelB: 'RAG', result: pw.graphrag_vs_rag },
+    { key: 'graphrag_vs_llm', keyA: 'GraphRAG', keyB: 'LLM', labelA: 'GraphRAG', labelB: 'LLM', result: pw.graphrag_vs_llm },
+    { key: 'rag_vs_llm', keyA: 'RAG', keyB: 'LLM', labelA: 'RAG', labelB: 'LLM', result: pw.rag_vs_llm }
+  ]
+})
+
+const getPairwiseWinnerClass = (result) => {
+  if (!result?.winner) return ''
+  if (result.winner === 'tie') return 'pairwise-tie'
+  return 'pairwise-has-winner'
+}
+
+const getPairwiseTagType = (winner, keyA, keyB) => {
+  if (!winner || winner === 'tie') return 'warning'
+  if (winner === keyA) return 'success'
+  if (winner === keyB) return 'info'
+  return 'default'
+}
+
+const getPairwiseWinnerLabel = (winner, keyA, keyB, labelA, labelB) => {
+  if (winner === 'tie') return '平局'
+  if (winner === keyA) return `${labelA} 胜出`
+  if (winner === keyB) return `${labelB} 胜出`
+  return '未知'
+}
 </script>
 
 <style lang="scss" scoped>
@@ -1197,6 +1307,177 @@ const scoreScaleList = [
   }
 }
 
+.pairwise-section {
+  background: #fafafa;
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 24px;
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+
+    h4 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    :deep(.n-icon) {
+      color: #d4af37;
+    }
+  }
+
+  .pairwise-subtitle {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 16px;
+    margin-left: 28px;
+  }
+
+  .pairwise-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+
+  .pairwise-card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    border-left: 4px solid #e0e0e0;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    &.pairwise-has-winner {
+      border-left-color: #52c41a;
+    }
+
+    &.pairwise-tie {
+      border-left-color: #faad14;
+    }
+  }
+
+  .pairwise-card-header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+
+    .pairwise-vs {
+      font-size: 14px;
+      font-weight: 700;
+      color: #333;
+    }
+
+    .pairwise-vs-divider {
+      font-size: 12px;
+      color: #bbb;
+      font-weight: 600;
+      padding: 2px 8px;
+      background: #f5f5f5;
+      border-radius: 4px;
+    }
+  }
+
+  .pairwise-winner {
+    text-align: center;
+    margin-bottom: 14px;
+
+    :deep(.n-tag) {
+      font-weight: 600;
+      padding: 4px 16px;
+    }
+  }
+
+  .pairwise-scores-row {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .pairwise-model-scores {
+    .pairwise-model-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: #555;
+      margin-bottom: 6px;
+      padding-left: 2px;
+    }
+
+    .pairwise-dim-bars {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .pairwise-dim-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+
+      .pairwise-dim-label {
+        font-size: 11px;
+        color: #888;
+        width: 52px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+
+      .pairwise-bar-track {
+        flex: 1;
+        height: 8px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        overflow: hidden;
+
+        .pairwise-bar-fill {
+          height: 100%;
+          border-radius: 4px;
+          transition: width 0.5s ease;
+        }
+      }
+
+      .pairwise-dim-value {
+        font-size: 11px;
+        font-weight: 700;
+        color: #555;
+        width: 20px;
+        text-align: left;
+        flex-shrink: 0;
+      }
+    }
+  }
+
+  .pairwise-reasoning {
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #fafafa;
+
+    .pairwise-reasoning-label {
+      font-size: 11px;
+      color: #888;
+      font-weight: 500;
+    }
+
+    .pairwise-reasoning-text {
+      font-size: 12px;
+      color: #666;
+      line-height: 1.5;
+    }
+  }
+}
+
 .answers-section {
   margin-bottom: 24px;
   
@@ -1368,6 +1649,28 @@ const scoreScaleList = [
     align-items: center;
     margin-bottom: 12px;
     
+    .header-metrics {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .time-badge {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 12px;
+      color: #888;
+      font-weight: 500;
+      padding: 2px 8px;
+      background: rgba(0, 0, 0, 0.04);
+      border-radius: 6px;
+      
+      :deep(.n-icon) {
+        color: #999;
+      }
+    }
+    
     .score-badge {
       font-weight: 700;
       font-size: 14px;
@@ -1494,7 +1797,8 @@ const scoreScaleList = [
 
 @media (max-width: 1200px) {
   .trace-grid,
-  .answers-section .answers-grid {
+  .answers-section .answers-grid,
+  .pairwise-section .pairwise-grid {
     grid-template-columns: 1fr;
   }
   

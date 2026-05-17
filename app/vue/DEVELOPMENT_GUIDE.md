@@ -46,23 +46,18 @@ npm run build
 
 **API调用**:
 ```typescript
-import { documentApi } from '@/api/services'
+import { uploadFile } from '@/api/services'
 
 // 上传文档
-const result = await documentApi.upload(file, {
-  enableAISegmentation: true,
-  userPrompt: '关注架构设计'
-})
+const formData = new FormData()
+formData.append('file', file)
+const result = await uploadFile(formData)
 
 // 获取文档列表
-const documents = await documentApi.list({
-  page: 1,
-  pageSize: 20,
-  status: 'completed'
-})
+const documents = await listDocuments(0, 20, 'created_at')
 
 // 删除文档
-await documentApi.delete(docId)
+await deleteDocument(docId)
 ```
 
 ---
@@ -140,16 +135,12 @@ const loadGraph = async () => {
     let data: GraphData
     
     if (currentDocumentId.value) {
-      // 加载文档范围图谱
-      data = await graphApi.getDocumentGraph(
+      data = await getDocumentGraph(
         currentDocumentId.value,
         documentDepth.value
       )
     } else {
-      // 加载全局图谱
-      data = await graphApi.visualize({
-        limit: nodeLimit.value
-      })
+      data = await getGraphData(nodeLimit.value)
     }
     
     renderGraph(data)
@@ -278,7 +269,7 @@ const searchNode = (keyword: string) => {
 </template>
 
 <script setup lang="ts">
-import { qaApi } from '@/api/services'
+import { askQuestion } from '@/api/services'
 import Markdown from '@/components/Markdown.vue'
 
 interface Message {
@@ -308,10 +299,8 @@ const handleSend = async () => {
   loading.value = true
   
   try {
-    // 调用API
-    const response = await qaApi.ask(userQuestion)
+    const response = await askQuestion(userQuestion)
     
-    // 添加AI回复
     messages.value.push({
       id: `msg_${Date.now()}`,
       role: 'assistant',
@@ -379,6 +368,27 @@ const formatTime = (timestamp: number) => {
 - 全文搜索
 - 概念详情
 - 关系网络
+
+---
+
+### 5. 质量评估系统
+
+**位置**: `src/views/Evaluation.vue`
+
+**功能**:
+- LLM-as-a-Judge 五维评分（准确性、完整性、相关性、一致性、流畅性）
+- GraphRAG vs RAG vs LLM 三路对比评估
+- 雷达图可视化对比（ECharts）
+- 信息溯源与证据展示
+- 基准数据集管理
+
+**API调用**:
+```typescript
+import { evaluateAnswerQuality } from '@/api/services'
+
+const result = await evaluateAnswerQuality(question, expectedAnswer)
+// result: { results: { graphrag, rag, llm }, comparison: {...} }
+```
 
 **卡片组件**:
 ```vue
@@ -577,8 +587,8 @@ const search = useDebounceFn(async (keyword: string) => {
 ### Store定义
 
 ```typescript
-// stores/document.ts
-export const useDocumentStore = defineStore('document', () => {
+// stores/documents.ts
+export const useDocumentStore = defineStore('documents', () => {
   // State
   const documents = ref<Document[]>([])
   const currentDocument = ref<Document | null>(null)
@@ -591,7 +601,7 @@ export const useDocumentStore = defineStore('document', () => {
   
   // Actions
   const loadDocuments = async () => {
-    const data = await documentApi.list()
+    const data = await listDocuments()
     documents.value = data
   }
   
@@ -614,7 +624,7 @@ export const useDocumentStore = defineStore('document', () => {
 
 ```vue
 <script setup lang="ts">
-import { useDocumentStore } from '@/stores/document'
+import { useDocumentStore } from '@/stores/documents'
 
 const docStore = useDocumentStore()
 
@@ -634,6 +644,34 @@ onMounted(() => {
 ```
 
 ---
+### Processing Store (任务处理状态)
+
+`src/stores/processing.ts` 管理长任务的处理状态与轮询。
+
+**特性**:
+- 自动轮询任务状态（1秒间隔）
+- 浮动窗口显示处理进度
+- 任务取消和进度追踪
+- 最小化/展开切换
+
+```typescript
+import { useProcessingStore } from '@/stores/processing'
+
+const procStore = useProcessingStore()
+
+// 添加任务后自动开始轮询
+procStore.addTask({
+  jobId: 'task_001',
+  documentName: '软件工程.pdf',
+  status: 'processing',
+  progress: 0
+})
+
+// 取消任务
+await procStore.cancelTask('task_001')
+```
+
+---
 
 ## 🎭 样式开发指南
 
@@ -642,7 +680,7 @@ onMounted(() => {
 ```scss
 // styles/variables.scss
 :root {
-  --primary-color: #18a058;
+  --primary-color: #d4af37;
   --text-color: #333;
   --border-color: #e0e0e0;
   --border-radius: 8px;

@@ -89,15 +89,16 @@ onMounted(async () => {
 
 ---
 
-### 2. Upload (文档上传)
+### 2. Upload (知识构建/文档上传)
 
-**路由**: `/upload`
+**路由**: `/knowledge`
 
 **功能**:
 - 拖拽上传文件
 - 批量上传
 - 上传进度显示
 - 文件格式验证
+- 文本/URL输入方式上传
 
 **关键代码**:
 ```vue
@@ -114,7 +115,7 @@ const handleUpload = async ({ file }) => {
   formData.append('file', file.file)
   
   try {
-    const result = await uploadDocument(formData)
+    const result = await uploadFile(formData)
     message.success(`上传成功: ${result.filename}`)
   } catch (error) {
     message.error(`上传失败: ${error.message}`)
@@ -215,21 +216,11 @@ const cy = cytoscape({
 import axios from 'axios'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000',
+  baseURL: import.meta.env.VITE_API_BASE || 'http://localhost:8000',
   timeout: 30000
 })
 
-// 请求拦截器
-api.interceptors.request.use(config => {
-  // 添加 token
-  const token = localStorage.getItem('token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
-  return config
-})
-
-// 响应拦截器
+// 响应拦截器自动抽取 response.data
 api.interceptors.response.use(
   response => response.data,
   error => {
@@ -238,15 +229,18 @@ api.interceptors.response.use(
   }
 )
 
-// API 方法
-export const getGraphData = (limit: number) => 
+// API 方法 (扁平函数导出)
+export const getGraphData = (limit: number) =>
   api.get(`/graph/visualize?limit=${limit}`)
 
-export const uploadDocument = (formData: FormData) =>
-  api.post('/uploads', formData)
+export const uploadFile = (formData: FormData) =>
+  api.post('/uploads/process', formData)
 
 export const askQuestion = (question: string) =>
   api.post('/qa/ask', { question })
+
+export const evaluateAnswerQuality = (question: string, expectedAnswer: string) =>
+  api.post('/evaluation/answer', { question, expected_answer: expectedAnswer })
 ```
 
 ---

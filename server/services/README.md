@@ -12,19 +12,13 @@ Kg4se 后端业务逻辑服务模块,提供文档处理、知识抽取、图谱�
 
 **核心类**:
 ```python
-from services.parser import DocumentParser
+from services.parser import ParserFactory
 
-# 初始化解析器（支持OCR配置）
-parser = DocumentParser(use_ocr=True)
+# 使用工厂模式创建解析器
+parser = ParserFactory.create_parser("pdf")  # 支持 "pdf", "txt", "word", "md"
 
-# 解析文档（自动选择最佳解析方案）
-text = parser.parse_file("document.pdf")
-metadata = parser.extract_metadata("document.pdf")
-
-# 获取解析详情
-result = parser.parse_with_details("document.pdf")
-print(f"使用方案: {result['method']}")
-print(f"文本内容: {result['content']}")
+# 解析文档
+text = parser.parse("document.pdf")
 ```
 
 **功能**:
@@ -54,11 +48,10 @@ RapidOCR为本地OCR引擎，无需API密钥配置，安装依赖后自动启用
 
 **核心类**:
 ```python
-from services.extractor import KnowledgeExtractor
+from services.extractor import TripletExtractor
 
-extractor = KnowledgeExtractor()
-entities = await extractor.extract_entities(text)
-relationships = await extractor.extract_relationships(text)
+extractor = TripletExtractor()
+triplets = await extractor.extract(chunk)
 ```
 
 **功能**:
@@ -69,30 +62,7 @@ relationships = await extractor.extract_relationships(text)
 
 ---
 
-### 3. **graph_service.py** - 图谱服务
-
-操作 Neo4j 知识图谱。
-
-**核心类**:
-```python
-from services.graph_service import GraphService
-
-graph = GraphService(neo4j_client)
-node_id = graph.create_node("Concept", {"name": "软件工程"})
-graph.create_relationship(node1_id, node2_id, "CONTAINS")
-neighbors = graph.get_neighbors(node_id, depth=2)
-```
-
-**功能**:
-- 节点 CRUD
-- 关系 CRUD
-- 图遍历查询
-- 批量操作
-- 事务管理
-
----
-
-### 4. **linker.py** - 实体链接服务
+### 3. **linker.py** - 实体链接服务
 
 将提取的实体链接到知识库。
 
@@ -101,7 +71,7 @@ neighbors = graph.get_neighbors(node_id, depth=2)
 from services.linker import EntityLinker
 
 linker = EntityLinker()
-linked_entities = linker.link_entities(entities, knowledge_base)
+linked_triplets = linker.link_and_merge(triplets)
 ```
 
 **功能**:
@@ -112,7 +82,7 @@ linked_entities = linker.link_entities(entities, knowledge_base)
 
 ---
 
-### 5. **ai_segmenter.py** - AI 分段服务
+### 4. **ai_segmenter.py** - AI 分段服务
 
 智能文档分块。
 
@@ -121,12 +91,7 @@ linked_entities = linker.link_entities(entities, knowledge_base)
 from services.ai_segmenter import AISegmenter
 
 segmenter = AISegmenter()
-chunks = segmenter.segment(
-    document_text,
-    chunk_size=512,
-    overlap=50,
-    strategy="semantic"
-)
+# AI分段器自动初始化客户端，支持降级到mock模式
 ```
 
 **分块策略**:
@@ -137,7 +102,7 @@ chunks = segmenter.segment(
 
 ---
 
-### 6. **qa_service.py** - 问答服务
+### 5. **qa_service.py** - 问答服务
 
 基于知识图谱的问答系统。
 
@@ -146,10 +111,9 @@ chunks = segmenter.segment(
 from services.qa_service import QAService
 
 qa = QAService()
-answer = await qa.answer(
+answer = await qa.query_knowledge_graph(
     question="什么是软件工程?",
-    context_docs=relevant_docs,
-    use_graph=True
+    context_docs=relevant_docs
 )
 ```
 
@@ -161,7 +125,7 @@ answer = await qa.answer(
 
 ---
 
-### 7. **config_service.py** - 配置管理服务
+### 6. **config_service.py** - 配置管理服务
 
 管理系统配置。
 
@@ -170,24 +134,41 @@ answer = await qa.answer(
 from services.config_service import ConfigService
 
 config = ConfigService()
-chunk_size = config.get("graphrag.chunk_size", default=512)
-config.update("graphrag.chunk_size", 1024)
+settings = config.get_settings()
+config.update_settings({"graphrag.chunk_size": 1024})
+```
+
+---
+
+### 7. **graphrag_pipeline_service.py** - GraphRAG 流水线服务
+
+编排完整的GraphRAG处理流水线。
+
+**核心类**:
+```python
+from services.graphrag_pipeline_service import GraphRAGPipelineService
+
+pipeline = GraphRAGPipelineService()
+result = await pipeline.process_document(
+    document_id="doc_001",
+    stages=[1, 2, 3, 4, 5, 6, 7]
+)
 ```
 
 ## 🔗 服务依赖关系
 
 ```
-DocumentParser
-    ↓
-AISegmenter
-    ↓
-KnowledgeExtractor
-    ↓
-EntityLinker
-    ↓
-GraphService
-    ↓
-QAService
+ParserFactory → GraphRAGPipelineService
+                      ↓
+            Stage 0 (可选) → Stage 1 → Stage 2 → Stage 3
+                                                     ↓
+                                               Stage 4 (谓词治理)
+                                                     ↓
+                                               Stage 5 (图谱存储)
+                                                     ↓
+                                               Stage 6 (主题构建)
+                                                     ↓
+                                          Stage 7 (度量) / Stage 8 (查询,可选)
 ```
 
 ## 💡 使用示例
@@ -195,41 +176,23 @@ QAService
 ### 完整文档处理流程
 
 ```python
-from services.parser import DocumentParser
-from services.ai_segmenter import AISegmenter
-from services.extractor import KnowledgeExtractor
-from services.linker import EntityLinker
-from services.graph_service import GraphService
+from services.parser import ParserFactory
+from services.graphrag_pipeline_service import GraphRAGPipelineService
 
 # 1. 解析文档
-parser = DocumentParser()
-text = parser.parse_file("document.pdf")
-metadata = parser.extract_metadata("document.pdf")
+parser = ParserFactory.create_parser("pdf")
+text = parser.parse("document.pdf")
 
-# 2. 智能分块
-segmenter = AISegmenter()
-chunks = segmenter.segment(text, chunk_size=512)
+# 2. 启动GraphRAG流水线（异步处理）
+pipeline = GraphRAGPipelineService()
+result = await pipeline.process_document(
+    document_id="doc_001",
+    stages=[1, 2, 3, 4, 5, 6, 7]
+)
 
-# 3. 知识抽取
-extractor = KnowledgeExtractor()
-entities = await extractor.extract_entities(text)
-relationships = await extractor.extract_relationships(text)
-
-# 4. 实体链接
-linker = EntityLinker()
-linked_entities = linker.link_entities(entities)
-
-# 5. 存储到图谱
-graph = GraphService(neo4j_client)
-for entity in linked_entities:
-    graph.create_node("Concept", entity)
-
-for rel in relationships:
-    graph.create_relationship(
-        rel["source"],
-        rel["target"],
-        rel["type"]
-    )
+print(f"块数: {result.chunks_count}")
+print(f"论断数: {result.claims_count}")
+print(f"概念数: {result.concepts_count}")
 ```
 
 ### 智能问答
@@ -239,16 +202,11 @@ from services.qa_service import QAService
 
 qa = QAService()
 
-# 提问
-answer = await qa.answer(
-    question="软件工程包含哪些阶段?",
-    context_limit=5,
-    use_graphrag=True
+answer = await qa.query_knowledge_graph(
+    question="软件工程包含哪些阶段?"
 )
 
-print(f"答案: {answer['answer']}")
-print(f"置信度: {answer['confidence']}")
-print(f"来源: {answer['sources']}")
+print(f"答案: {answer}")
 ```
 
 ## 🧪 单元测试

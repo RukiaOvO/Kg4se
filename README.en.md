@@ -157,7 +157,7 @@ npm run dev
 
 ### Knowledge graph (GraphRAG)
 
-- 9-stage pipeline: chunk → coref → link → extract → theme → predicate → store → query → metrics
+- 9-stage pipeline: chunk → coref → link → extract → predicate → store → theme → metrics → query
 - Idempotent Neo4j MERGE storage with deduplication
 - Configurable ontology, predicates, and thresholds
 
@@ -187,7 +187,7 @@ npm run dev
 └────────────────────┬─────────────────────────────────────────┘
                      │
 ┌────────────────────▼─────────────────────────────────────────┐
-│                    GraphRAG 8 Stages                         │
+│                    GraphRAG 9 Stages                         │
 └────────────────────┬─────────────────────────────────────────┘
                      │
 ┌────────────────────▼─────────────────────────────────────────┐
@@ -212,9 +212,11 @@ npm run dev
 
 ```bash
 cd server
-pytest                     # default fast set
-pytest -m unit             # unit only
+pytest -m unit             # fast unit tests
 pytest -m integration      # requires Neo4j/Redis
-pytest -m api              # FastAPI routes
-pytest --cov=. --cov-report=html
+pytest -m api              # FastAPI route tests
+pytest -m graphrag         # GraphRAG pipeline tests
+pytest --cov=. --cov-report=html --cov-report=term-missing
 ```
+
+> **Note**: Install `pytest-cov` before running coverage tests: `pip install pytest-cov`

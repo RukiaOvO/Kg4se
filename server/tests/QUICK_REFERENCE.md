@@ -185,8 +185,7 @@ pytest tests/ -v
 ## 📖 详细文档
 
 - [完整测试指南](TEST_GUIDE.md) - 测试运行和编写详细说明
-- [测试组织结构](TESTS_ORGANIZATION.md) - 测试文件分类和用途
-- [测试最佳实践](TESTING_GUIDE.md) - 测试策略和模式
+- [README](README.md) - 测试文件分类和用途
 
 ---
 

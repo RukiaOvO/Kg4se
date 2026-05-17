@@ -495,6 +495,31 @@ export interface MethodEvaluation {
   samples: any[] | null
 }
 
+export interface PairwiseComparisonResult {
+  scores: {
+    [modelName: string]: {
+      accuracy: number
+      comprehensiveness: number
+      coherence: number
+      helpfulness: number
+    }
+  }
+  winner: string
+  reasoning: string
+  vote_counts: {
+    [modelName: string]: number
+  }
+  num_comparisons: number
+}
+
+export interface EvaluationTiming {
+  graphrag_gen_time: number
+  rag_gen_time: number
+  llm_gen_time: number
+  pairwise_time: number
+  total_time: number
+}
+
 export interface AnswerEvaluationResult {
   success: boolean
   question: string
@@ -515,6 +540,12 @@ export interface AnswerEvaluationResult {
     graphrag_over_rag_percent: number
     graphrag_over_llm_percent: number
     rag_over_llm_percent: number
+  }
+  timing?: EvaluationTiming
+  pairwise?: {
+    graphrag_vs_rag: PairwiseComparisonResult
+    graphrag_vs_llm: PairwiseComparisonResult
+    rag_vs_llm: PairwiseComparisonResult
   }
   trace?: {
     graphrag: {
@@ -542,8 +573,9 @@ export interface AnswerEvaluationResult {
 export const evaluateAnswerQuality = (question: string, expectedAnswer?: string): Promise<AnswerEvaluationResult> =>
   api.post('/evaluation/answer', {
     question,
-    expected_answer: expectedAnswer
-  }, { timeout: 180000 })
+    expected_answer: expectedAnswer,
+    num_samples: 3
+  }, { timeout: 360000 })
 
 
 // ========== Benchmark Dataset APIs ==========

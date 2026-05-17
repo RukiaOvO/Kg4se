@@ -76,14 +76,12 @@ Kg4se/
 | 文档 | 路径 | 内容 |
 |------|------|------|
 | Infra模块说明 | `/server/infra/README.md` | AI提供商、Neo4j客户端、配置管理、队列、存储 |
-| AI提供商集成 | `/server/infra/AI_PROVIDERS.md` | 10+AI提供商接入指南 |
-| Neo4j操作手册 | `/server/infra/NEO4J_GUIDE.md` | 图数据库操作和优化 |
 
 **核心内容**:
-- ✅ 支持OpenAI、Claude、Gemini、通义千问等12个AI提供商
+- ✅ 支持OpenAI、Claude、Gemini、DeepSeek等12个AI提供商
 - ✅ Neo4j连接管理（自动重连、批量操作）
 - ✅ 配置管理（环境变量、.env文件、config模块）
-- ✅ 异步任务队列（Redis）
+- ✅ 异步任务队列（Redis + RQ）
 - ✅ 文件存储服务
 - ✅ Neo4j 5.26-community + APOC + GDS 插件
 
@@ -110,12 +108,9 @@ Kg4se/
 | 文档 | 路径 | 内容 |
 |------|------|------|
 | Services模块说明 | `/server/services/README.md` | 业务逻辑服务详解 |
-| Parser服务 | `/server/services/PARSER.md` | 文档解析服务 |
-| Extractor服务 | `/server/services/EXTRACTOR.md` | 知识抽取服务 |
-| EntityLinker服务 | `/server/services/LINKER.md` | 实体链接服务 |
 
 **核心服务**:
-- `ParserService`: 支持PDF、Word、Markdown、EPUB等格式，集成Docling和RapidOCR
+- `ParserFactory`: 支持PDF、Word、Markdown、TXT等格式，集成Docling和RapidOCR
 - `TripletExtractor`: 基于LLM的三元组提取
 - `EntityLinker`: 实体去重和链接
 - `AISegmenter`: AI智能分段
@@ -130,19 +125,19 @@ Kg4se/
 | 文档 | 路径 | 内容 |
 |------|------|------|
 | Routes模块说明 | `/server/routes/README.md` | API路由和端点文档 |
-| API接口文档 | `/server/routes/API_REFERENCE.md` | 完整API参考 |
-| 认证授权 | `/server/routes/AUTH.md` | 认证和权限管理 |
 
 **API模块**:
-- `/api/uploads`: 文档管理API
-- `/api/ingest`: 知识提取API
-- `/api/graph`: 图谱可视化API
-- `/api/qa`: 智能问答API
-- `/api/knowledge-cards`: 知识卡片API
-- `/api/settings`: 系统设置API
-- `/api/evaluation`: 质量评估API
-  - `/evaluation/graph`: 图谱质量分析
-  - `/evaluation/answer`: 回答质量对比评估
+- `/uploads`: 文档上传和管理API
+- `/ingest`: 知识抽取任务API
+- `/graph`: 图谱可视化与CRUD API
+- `/qa`: 智能问答API（含流式响应）
+- `/knowledge-cards`: 知识卡片API
+- `/settings`: 系统设置与AI配置API
+- `/evaluation`: 质量评估API
+  - `/evaluation/answer`: 单问题三路对比评估
+  - `/evaluation/batch`: 批量数据集评估
+  - `/evaluation/pairwise`: 两两成对比较
+  - `/evaluation/datasets`: 基准数据集管理
 
 ---
 
@@ -151,23 +146,17 @@ Kg4se/
 | 文档 | 路径 | 内容 |
 |------|------|------|
 | GraphRAG说明 | `/server/graphrag/README.md` | 知识图谱增量构建pipeline |
-| Stage 0: Chunker | `/server/graphrag/stages/STAGE0.md` | 文档智能切分 |
-| Stage 1: Coref | `/server/graphrag/stages/STAGE1.md` | 指代消解 |
-| Stage 2: Linker | `/server/graphrag/stages/STAGE2.md` | 实体链接 |
-| Stage 3: Extractor | `/server/graphrag/stages/STAGE3.md` | 三元组提取 |
-| Stage 4: Theme | `/server/graphrag/stages/STAGE4.md` | 主题构建 |
-| Stage 5-8 | `/server/graphrag/stages/` | 谓词治理/存储/查询/指标 |
 
-**9阶段Pipeline**:
-1. 📄 Stage 0: 篇章切分
-2. 🔗 Stage 1: 指代消解
-3. 🏷️ Stage 2: 实体链接
-4. 📊 Stage 3: Claim提取
-5. 🎨 Stage 4: 主题构建
-6. ⚖️ Stage 5: 谓词治理
-7. 💾 Stage 6: 图谱服务
-8. 🔍 Stage 7: 查询服务
-9. 📈 Stage 8: 度量服务
+**9阶段Pipeline (默认运行核心1-7阶段)**:
+1. 📄 Stage 0: 篇章切分 (Chunker) — 可选
+2. 🔗 Stage 1: 指代消解 (Coreference)
+3. 🏷️ Stage 2: 实体链接 (Entity Linking)
+4. 📊 Stage 3: Claim提取 (Claim Extraction)
+5. ⚖️ Stage 4: 谓词治理 (Predicate Governance)
+6. 💾 Stage 5: 图谱存储 (Graph Service)
+7. 🎨 Stage 6: 主题构建 (Theme Building)
+8. 📈 Stage 7: 度量服务 (Metrics Service)
+9. 🔍 Stage 8: 查询服务 (Query Service) — 可选
 
 ---
 
@@ -175,15 +164,15 @@ Kg4se/
 
 | 文档 | 路径 | 内容 |
 |------|------|------|
-| 测试组织说明 | `/server/tests/TESTS_ORGANIZATION.md` | 测试分类和运行指南 |
+| 测试指南 | `/server/tests/TEST_GUIDE.md` | 测试运行和编写详细说明 |
 | 测试快速参考 | `/server/tests/QUICK_REFERENCE.md` | 常用测试命令 |
 | 测试修复总结 | `/server/tests/TEST_FIXES_SUMMARY.md` | 单元测试修复记录 |
 
-**测试覆盖**:
-- ✅ 单元测试: 7个通过
-- ✅ 集成测试: 43个通过
-- ✅ GraphRAG测试: 17个通过
-- 📊 覆盖率: Services 5%, GraphRAG Stages ~15%
+**测试结构**:
+- ✅ 单元测试: `tests/test_services.py`, `tests/graphrag/`
+- ✅ 集成测试: `tests/test_api_routes.py`, `tests/test_infrastructure.py`
+- ✅ GraphRAG测试: `tests/graphrag/stages/`
+- ✅ 快速验证脚本: `tests/verify_quick.py`
 
 ---
 
@@ -193,22 +182,18 @@ Kg4se/
 |------|------|------|
 | 前端架构文档 | `/app/vue/src/README.md` | Vue 3项目架构说明 |
 | 开发指南 | `/app/vue/DEVELOPMENT_GUIDE.md` | 前端开发详细指南 |
-| 组件库 | `/app/vue/COMPONENTS.md` | 通用组件文档 |
-| 状态管理 | `/app/vue/STORES.md` | Pinia状态管理 |
 
 **核心页面**:
 - `Dashboard.vue`: 仪表盘（统计数据）
-- `Upload.vue`: 文档上传（拖拽/批量）
+- `Upload.vue`: 知识构建/文档上传（拖拽/批量）
 - `Documents.vue`: 文档管理（列表/搜索）
-- `Graph.vue`: 知识图谱可视化（1571行核心代码）
-- `Query.vue`: 智能问答（对话界面）
+- `Graph.vue`: 知识图谱可视化
 - `KnowledgeCard.vue`: 知识卡片（概念浏览）
-- `Evaluation.vue`: 质量评估（图谱质量、回答对比）
-- `Status.vue`: 处理状态监控
+- `Evaluation.vue`: 质量评估（LLM-as-a-Judge五维评分）
 - `Settings.vue`: 系统设置（AI配置）
+- `Status.vue`: 处理状态监控
 
 **技术亮点**:
-- ✅ Cytoscape.js图可视化（5种布局算法）
 - ✅ Composition API + TypeScript
 - ✅ Naive UI高质量组件
 - ✅ Pinia状态管理
@@ -223,19 +208,17 @@ Kg4se/
 1. 前端上传界面: `/app/vue/src/views/Upload.vue`
 2. 上传API: `/server/routes/upload.py`
 3. 文档解析: `/server/services/parser.py` + `/server/services/README.md`
-4. AI智能分段: `/server/services/ai_segmenter.py`
-5. 测试: `/server/tests/test_services.py`
+4. 测试: `/server/tests/test_services.py`
 
 ---
 
 ### 知识图谱构建
 
 1. GraphRAG Pipeline: `/server/graphrag/README.md`
-2. 各阶段详细文档: `/server/graphrag/stages/STAGE*.md`
-3. 三元组提取: `/server/services/extractor.py`
-4. 实体链接: `/server/services/linker.py`
-5. Neo4j存储: `/server/infra/neo4j_client.py`
-6. 测试: `/server/tests/graphrag/stages/`
+2. 三元组提取: `/server/services/extractor.py`
+3. 实体链接: `/server/services/linker.py`
+4. Neo4j存储: `/server/infra/neo4j_client.py`
+5. 测试: `/server/tests/graphrag/stages/`
 
 ---
 
@@ -244,25 +227,23 @@ Kg4se/
 1. 前端可视化: `/app/vue/src/views/Graph.vue`
 2. 图谱API: `/server/routes/graph.py`
 3. Neo4j查询: `/server/infra/neo4j_client.py`
-4. 开发指南: `/app/vue/DEVELOPMENT_GUIDE.md` (第2节)
+4. 开发指南: `/app/vue/DEVELOPMENT_GUIDE.md`
 
 ---
 
 ### 智能问答
 
-1. 问答界面: `/app/vue/src/views/Query.vue`
-2. QA服务: `/server/services/qa_service.py`
-3. QA API: `/server/routes/qa.py`
-4. 知识检索: `/server/graphrag/stages/stage7_query_service.py`
+1. QA服务: `/server/services/qa_service.py`
+2. QA API: `/server/routes/qa.py`
+3. 知识检索: `/server/graphrag/stages/stage8_query_service.py`
 
 ---
 
 ### AI提供商集成
 
-1. AI提供商文档: `/server/infra/README.md` (AI Providers部分)
-2. 配置管理: `/server/infra/config.py`
-3. 使用示例: `/server/services/extractor.py`
-4. 前端设置: `/app/vue/src/views/Settings.vue`
+1. AI提供商文档: `/server/infra/README.md`
+2. 配置管理: `/server/config/settings.py`
+3. 前端设置: `/app/vue/src/views/Settings.vue`
 
 
 ## 🔗 外部资源

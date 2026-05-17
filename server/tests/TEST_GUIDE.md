@@ -330,14 +330,13 @@ def my_test_data(neo4j_test_client):
 | `test_documents_*.py` | 文档管理功能测试套件 |
 | `test_graph_api.py` | 图谱可视化 API 测试 |
 
-详细的测试组织说明请查看 [TESTS_ORGANIZATION.md](TESTS_ORGANIZATION.md)。
+详细的测试文件说明请查看 [README.md](README.md)。
 
 ---
 
 ## 📚 相关资源
 
-- [测试组织结构](TESTS_ORGANIZATION.md) - 完整的测试文件分类和说明
-- [pytest 官方文档](https://docs.pytest.org/)
+- [Pytest 官方文档](https://docs.pytest.org/)
 - [pytest-asyncio 文档](https://pytest-asyncio.readthedocs.io/)
 - [FastAPI 测试指南](https://fastapi.tiangolo.com/tutorial/testing/)
 - [Neo4j Python 驱动文档](https://neo4j.com/docs/python-manual/current/)

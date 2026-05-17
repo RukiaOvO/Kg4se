@@ -17,9 +17,9 @@
 ```
 models/
 ├── __init__.py              # 模块初始化，导出所有模型
-├── document.py              # 文档相关模型
-├── api.py                   # API通用响应模型
-└── settings.py              # 系统设置模型
+├── document.py              # 文档相关模型 (Document, Chunk, Triplet)
+├── graph.py                 # 图谱模型
+└── knowledge_card.py        # 知识卡片模型
 ```
 
 ---
@@ -209,89 +209,16 @@ config = AIExtractionRequest(
 
 ---
 
-## 🔧 API Models (`api.py`)
+## ⚙️ 系统配置
 
-### 通用响应模型
+系统配置由 `server/config/settings.py` 中的 `Settings` 类管理，支持环境变量和 `.env` 文件。
 
-#### `APIResponse`
-标准API响应格式
-
-```python
-class APIResponse(BaseModel):
-    """标准API响应"""
-    success: bool                         # 是否成功
-    message: str                          # 消息
-    data: Optional[Any] = None           # 响应数据
-    error: Optional[str] = None          # 错误信息
-    
-class PaginatedResponse(BaseModel):
-    """分页响应"""
-    items: List[Any]                     # 数据列表
-    total: int                           # 总数
-    page: int                            # 当前页
-    page_size: int                       # 每页大小
-    pages: int                           # 总页数
-```
-
-**使用示例**:
-```python
-from models.api import APIResponse
-
-# 成功响应
-return APIResponse(
-    success=True,
-    message="文档上传成功",
-    data={"doc_id": "doc_001"}
-)
-
-# 错误响应
-return APIResponse(
-    success=False,
-    message="文档上传失败",
-    error="文件格式不支持"
-)
-
-# 分页响应
-return PaginatedResponse(
-    items=[doc1, doc2, doc3],
-    total=100,
-    page=1,
-    page_size=10,
-    pages=10
-)
-```
-
----
-
-## ⚙️ Settings Models (`settings.py`)
-
-### 系统设置模型
-
-```python
-class AIProviderSettings(BaseModel):
-    """AI提供商设置"""
-    provider: str                        # 提供商标识
-    api_key: str                         # API密钥
-    model: str                           # 模型名称
-    base_url: Optional[str] = None      # 基础URL
-    temperature: float = 0.3            # 温度参数
-    max_tokens: int = 4096              # 最大令牌数
-
-class ProcessingSettings(BaseModel):
-    """文档处理设置"""
-    chunk_size: int = 2000              # 块大小
-    chunk_overlap: int = 200            # 块重叠
-    enable_coref: bool = True           # 启用指代消解
-    enable_entity_linking: bool = True  # 启用实体链接
-    extraction_mode: str = "auto"       # 提取模式: auto/rule/llm
-
-class SystemSettings(BaseModel):
-    """系统设置"""
-    ai_provider: AIProviderSettings     # AI设置
-    processing: ProcessingSettings      # 处理设置
-    neo4j_uri: str                      # Neo4j URI
-    redis_host: str                     # Redis主机
-```
+**核心配置项**:
+- AI提供商: provider, api_key, model, base_url, temperature
+- Neo4j: uri, user, password
+- Redis: host, port, db
+- 文档处理: chunk_size, chunk_overlap
+- 存储: upload_dir, max_upload_size
 
 ---
 

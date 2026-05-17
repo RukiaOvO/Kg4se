@@ -30,7 +30,7 @@ Kg4se 后端 API 路由模块,提供 RESTful API 接口。
 | `/graph` | graph.py | 图谱查询和可视化 |
 | `/qa` | qa.py | 智能问答 |
 | `/knowledge-cards` | knowledge_card.py | 知识卡片管理 |
-| `/evaluation` | evaluation.py | 质量评估（图谱质量、回答质量） |
+| `/evaluation` | evaluation.py | 质量评估（回答质量、批量评估、基准数据集） |
 | `/settings` | settings.py | 系统设置 |
 
 ### 依赖服务端口
@@ -40,18 +40,6 @@ Kg4se 后端 API 路由模块,提供 RESTful API 接口。
 | Neo4j HTTP | 17474 | 7474 | 图数据库控制台 |
 | Neo4j Bolt | 17687 | 7687 | 图数据库连接 |
 | Redis | 16379 | 6379 | 缓存/队列 |
-
-### 路由前缀
-
-| 前缀 | 模块 | 描述 |
-|------|------|------|
-| `/uploads` | upload.py | 文档上传和管理 |
-| `/ingest` | ingest.py | 知识抽取任务 |
-| `/graph` | graph.py | 图谱查询和可视化 |
-| `/qa` | qa.py | 智能问答 |
-| `/knowledge-cards` | knowledge_card.py | 知识卡片管理 |
-| `/evaluation` | evaluation.py | 质量评估（图谱质量、回答质量） |
-| `/settings` | settings.py | 系统设置 |
 
 ## 📦 路由模块
 
@@ -553,39 +541,6 @@ file: <文件数据>
 
 **质量评估API**
 
-#### `GET /evaluation/graph`
-
-获取知识图谱质量评估结果
-
-**响应**:
-```json
-{
-  "structural_quality": {
-    "node_count": 1234,
-    "edge_count": 3456,
-    "avg_degree": 5.6,
-    "connected_components": 1,
-    "modularity": 0.5,
-    "density": 0.035
-  },
-  "content_quality": {
-    "sample_size": 100,
-    "valid_ratio": 0.95,
-    "avg_confidence": 0.88,
-    "predicate_diversity": 15,
-    "predicate_normalized_ratio": 0.85
-  },
-  "construction_efficiency": {
-    "documents_processed": 50,
-    "total_build_time": 3600,
-    "tokens_consumed": 500000,
-    "throughput": 0.014
-  },
-  "overall_score": 0.85,
-  "recommendations": ["建议增加更多文档以提升覆盖率", "部分谓词需要规范化"]
-}
-```
-
 #### `POST /evaluation/answer`
 
 对比评估GraphRAG、RAG、LLM三种回答方式
@@ -606,30 +561,15 @@ file: <文件数据>
   "results": {
     "graphrag": {
       "answer": "...",
-      "score": {
-        "accuracy": 4.5,
-        "completeness": 4.2,
-        "relevance": 4.8,
-        "overall": 4.5
-      }
+      "score": {"accuracy": 4.5, "completeness": 4.2, "relevance": 4.8, "overall": 4.5}
     },
     "rag": {
       "answer": "...",
-      "score": {
-        "accuracy": 3.8,
-        "completeness": 3.5,
-        "relevance": 4.0,
-        "overall": 3.8
-      }
+      "score": {"accuracy": 3.8, "completeness": 3.5, "relevance": 4.0, "overall": 3.8}
     },
     "llm": {
       "answer": "...",
-      "score": {
-        "accuracy": 3.2,
-        "completeness": 3.0,
-        "relevance": 3.5,
-        "overall": 3.2
-      }
+      "score": {"accuracy": 3.2, "completeness": 3.0, "relevance": 3.5, "overall": 3.2}
     }
   },
   "comparison": {
@@ -639,6 +579,36 @@ file: <文件数据>
   }
 }
 ```
+
+#### `POST /evaluation/batch`
+
+批量数据集评估
+
+**请求体**:
+```json
+{
+  "questions": [
+    {"question": "...", "expected_answer": "..."}
+  ],
+  "methods": ["graphrag", "rag", "llm"]
+}
+```
+
+#### `POST /evaluation/pairwise`
+
+两两成对比较评估
+
+#### `GET /evaluation/datasets`
+
+获取可用基准数据集列表
+
+#### `GET /evaluation/datasets/{dataset_id}`
+
+获取特定基准数据集
+
+#### `POST /evaluation/datasets/{dataset_id}/evaluate`
+
+在指定数据集上执行评估
 
 #### `GET /evaluation/health`
 

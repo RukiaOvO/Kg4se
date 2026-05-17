@@ -401,7 +401,7 @@ open htmlcov/index.html  # 查看详细报告
 
 ## 📚 相关文档
 
-- [测试组织说明](./TESTS_ORGANIZATION.md)
+- [README](./README.md)
 - [快速参考](QUICK_REFERENCE.md)
 - [pytest配置](../pytest.ini)
 - [服务层README](../services/README.md)

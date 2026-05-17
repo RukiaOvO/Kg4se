@@ -1,6 +1,10 @@
 """Evaluation API routes for quality analysis."""
 import asyncio
 import json
+import os
+import time
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, Optional, List
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import APIRouter, HTTPException
@@ -22,7 +26,7 @@ class AnswerEvaluationRequest(BaseModel):
     """Request model for answer quality evaluation."""
     question: str
     expected_answer: Optional[str] = None
-    num_samples: int = 1
+    num_samples: int = 3
 
 
 class AnswerEvaluationResponse(BaseModel):
@@ -34,6 +38,8 @@ class AnswerEvaluationResponse(BaseModel):
     llm_answer: str
     evaluation: Dict[str, Any]
     improvement: Dict[str, float]
+    timing: Optional[Dict[str, float]] = None
+    pairwise: Optional[Dict[str, Any]] = None
     trace: Optional[Dict[str, Any]] = None
 
 
@@ -89,8 +95,90 @@ async def evaluate_answer_quality(request: AnswerEvaluationRequest):
         raise HTTPException(status_code=500, detail=f"回答质量评估失败: {str(e)}")
 
 
+def _save_evaluation_report(
+    question: str,
+    expected_answer: str,
+    graphrag_answer: str,
+    rag_answer: str,
+    llm_answer: str,
+    evaluation: Dict[str, Any],
+    improvement: Dict[str, float],
+    timing: Dict[str, float],
+    pairwise_stats: Dict[str, Any]
+):
+    """将单次评估结果保存为JSON报告文件到 data/ 目录"""
+    project_root = Path(__file__).parent.parent.parent
+    data_dir = project_root / "data"
+    os.makedirs(data_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    import re
+    safe_question = re.sub(r'[\\/:*?"<>|]', '', question[:30].replace(" ", "_"))
+    if not safe_question:
+        safe_question = "evaluation"
+    filename = f"eval_{timestamp}_{safe_question}.json"
+    filepath = data_dir / filename
+    
+    report = {
+        "report_meta": {
+            "generated_at": datetime.now().isoformat(),
+            "type": "single_question_evaluation",
+            "question": question,
+            "expected_answer": expected_answer or "未提供参考答案",
+            "num_samples": 3
+        },
+        "answers": {
+            "graphrag": graphrag_answer,
+            "rag": rag_answer,
+            "llm": llm_answer
+        },
+        "scores": {
+            "graphrag": {
+                "overall_score": evaluation["graphrag"]["overall_score"],
+                "automatic_score": evaluation["graphrag"].get("automatic", {}).get("score", 0),
+                "llm_judge": evaluation["graphrag"].get("llm_judge", {}),
+                "info_credibility": evaluation["graphrag"].get("info_credibility", 0)
+            },
+            "rag": {
+                "overall_score": evaluation["rag"]["overall_score"],
+                "automatic_score": evaluation["rag"].get("automatic", {}).get("score", 0),
+                "llm_judge": evaluation["rag"].get("llm_judge", {}),
+                "info_credibility": evaluation["rag"].get("info_credibility", 0)
+            },
+            "llm": {
+                "overall_score": evaluation["llm"]["overall_score"],
+                "automatic_score": evaluation["llm"].get("automatic", {}).get("score", 0),
+                "llm_judge": evaluation["llm"].get("llm_judge", {}),
+                "info_credibility": evaluation["llm"].get("info_credibility", 0)
+            }
+        },
+        "improvement_percent": improvement,
+        "timing": timing,
+        "pairwise": {
+            "graphrag_vs_rag": {
+                "winner": pairwise_stats["graphrag_vs_rag"]["winner"],
+                "vote_counts": pairwise_stats["graphrag_vs_rag"]["vote_counts"]
+            },
+            "graphrag_vs_llm": {
+                "winner": pairwise_stats["graphrag_vs_llm"]["winner"],
+                "vote_counts": pairwise_stats["graphrag_vs_llm"]["vote_counts"]
+            },
+            "rag_vs_llm": {
+                "winner": pairwise_stats["rag_vs_llm"]["winner"],
+                "vote_counts": pairwise_stats["rag_vs_llm"]["vote_counts"]
+            }
+        }
+    }
+    
+    with open(filepath, "w", encoding="utf-8") as f:
+        json.dump(report, f, ensure_ascii=False, indent=2)
+    
+    logger.info(f"[评估服务] 报告已保存: {filepath}")
+
+
 def _sync_evaluate_answer(request: AnswerEvaluationRequest) -> AnswerEvaluationResponse:
     """同步执行回答质量评估（在线程池中并行运行）"""
+    _total_start = time.time()
     logger.info("\n" + "="*80)
     logger.info("[评估服务] 开始评估回答质量（并行模式）")
     logger.info(f"问题: {request.question}")
@@ -98,14 +186,33 @@ def _sync_evaluate_answer(request: AnswerEvaluationRequest) -> AnswerEvaluationR
     logger.info("="*80)
     
     logger.info("[评估服务] 阶段 1/2: 并行获取三种回答...")
+    _phase1_start = time.time()
     with ThreadPoolExecutor(max_workers=3) as executor:
-        future_graphrag = executor.submit(qa_service.answer_with_graphrag, question=request.question)
-        future_rag = executor.submit(qa_service.answer_with_rag, question=request.question)
-        future_llm = executor.submit(qa_service.answer_with_llm, question=request.question)
+        submit_times = {}
+        name_to_future = {}
         
-        graphrag_result = future_graphrag.result()
-        rag_result = future_rag.result()
-        llm_result = future_llm.result()
+        submit_times["graphrag"] = time.time()
+        name_to_future["graphrag"] = executor.submit(qa_service.answer_with_graphrag, question=request.question)
+        submit_times["rag"] = time.time()
+        name_to_future["rag"] = executor.submit(qa_service.answer_with_rag, question=request.question)
+        submit_times["llm"] = time.time()
+        name_to_future["llm"] = executor.submit(qa_service.answer_with_llm, question=request.question)
+        
+        results_map = {}
+        times_map = {}
+        for future in as_completed(name_to_future.values()):
+            for name, f in name_to_future.items():
+                if f is future:
+                    results_map[name] = future.result()
+                    times_map[name] = round(time.time() - submit_times[name], 3)
+                    break
+    
+    graphrag_result = results_map["graphrag"]
+    graphrag_time = times_map["graphrag"]
+    rag_result = results_map["rag"]
+    rag_time = times_map["rag"]
+    llm_result = results_map["llm"]
+    llm_time = times_map["llm"]
     
     graphrag_answer = graphrag_result.get("answer", "回答失败")
     graphrag_context = graphrag_result.get("context_snippet", None)
@@ -124,7 +231,8 @@ def _sync_evaluate_answer(request: AnswerEvaluationRequest) -> AnswerEvaluationR
     
     evaluator = PointwiseEvaluator(llm_client=qa_service)
     
-    logger.info("[评估服务] 阶段 2/2: 并行评估三种回答质量...")
+    logger.info("[评估服务] 阶段 2/3: 并行评估三种回答质量...")
+    _phase2_start = time.time()
     with ThreadPoolExecutor(max_workers=3) as executor:
         future_ge = executor.submit(
             evaluator.evaluate,
@@ -161,6 +269,80 @@ def _sync_evaluate_answer(request: AnswerEvaluationRequest) -> AnswerEvaluationR
     logger.info(f"[评估服务] GraphRAG 评估完成，得分: {graphrag_eval['overall_score']:.4f}")
     logger.info(f"[评估服务] RAG 评估完成，得分: {rag_eval['overall_score']:.4f}")
     logger.info(f"[评估服务] LLM 评估完成，得分: {llm_eval['overall_score']:.4f}")
+    logger.info(f"[评估服务] 阶段 2 耗时: {round(time.time() - _phase2_start, 3)}秒")
+    
+    # 阶段 3: Pairwise 成对比较（位置交换策略消除偏差）
+    logger.info("[评估服务] 阶段 3/3: 成对比较三种回答...")
+    _pairwise_start = time.time()
+    pairwise_evaluator = PairwiseEvaluator(llm_client=qa_service)
+    
+    pairwise_results = {}
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_gr = executor.submit(
+            pairwise_evaluator.compare,
+            request.question, graphrag_answer, rag_answer, "GraphRAG", "RAG",
+            True
+        )
+        future_gl = executor.submit(
+            pairwise_evaluator.compare,
+            request.question, graphrag_answer, llm_answer, "GraphRAG", "LLM",
+            True
+        )
+        future_rl = executor.submit(
+            pairwise_evaluator.compare,
+            request.question, rag_answer, llm_answer, "RAG", "LLM",
+            True
+        )
+        
+        pairwise_results["graphrag_vs_rag"] = future_gr.result()
+        pairwise_results["graphrag_vs_llm"] = future_gl.result()
+        pairwise_results["rag_vs_llm"] = future_rl.result()
+    
+    pairwise_time = round(time.time() - _pairwise_start, 3)
+    logger.info(f"[评估服务] 成对比较完成，耗时: {pairwise_time}秒")
+    
+    # 计算胜率统计
+    def _count_wins(results_dict, key_a, key_b):
+        comp = results_dict[key_b]
+        winner = comp["winner"]
+        return {
+            key_a: float(comp["vote_counts"].get(key_a, 0)),
+            key_b: float(comp["vote_counts"].get(key_b, 0)),
+            "tie": float(comp["vote_counts"].get("tie", 0))
+        }
+    
+    pairwise_stats = {
+        "graphrag_vs_rag": {
+            "scores": pairwise_results["graphrag_vs_rag"]["scores"],
+            "winner": pairwise_results["graphrag_vs_rag"]["winner"],
+            "reasoning": pairwise_results["graphrag_vs_rag"]["reasoning"],
+            "vote_counts": pairwise_results["graphrag_vs_rag"]["vote_counts"],
+            "num_comparisons": pairwise_results["graphrag_vs_rag"]["num_comparisons"]
+        },
+        "graphrag_vs_llm": {
+            "scores": pairwise_results["graphrag_vs_llm"]["scores"],
+            "winner": pairwise_results["graphrag_vs_llm"]["winner"],
+            "reasoning": pairwise_results["graphrag_vs_llm"]["reasoning"],
+            "vote_counts": pairwise_results["graphrag_vs_llm"]["vote_counts"],
+            "num_comparisons": pairwise_results["graphrag_vs_llm"]["num_comparisons"]
+        },
+        "rag_vs_llm": {
+            "scores": pairwise_results["rag_vs_llm"]["scores"],
+            "winner": pairwise_results["rag_vs_llm"]["winner"],
+            "reasoning": pairwise_results["rag_vs_llm"]["reasoning"],
+            "vote_counts": pairwise_results["rag_vs_llm"]["vote_counts"],
+            "num_comparisons": pairwise_results["rag_vs_llm"]["num_comparisons"]
+        }
+    }
+    
+    total_time = round(time.time() - _total_start, 3)
+    timing = {
+        "graphrag_gen_time": graphrag_time,
+        "rag_gen_time": rag_time,
+        "llm_gen_time": llm_time,
+        "pairwise_time": pairwise_time,
+        "total_time": total_time
+    }
     
     graphrag_score = graphrag_eval["overall_score"]
     rag_score = rag_eval["overall_score"]
@@ -184,10 +366,24 @@ def _sync_evaluate_answer(request: AnswerEvaluationRequest) -> AnswerEvaluationR
     }
     
     logger.info("\n[评估服务] 评估完成")
-    logger.info(f"   GraphRAG 评分: {graphrag_score:.4f}")
-    logger.info(f"   RAG 评分: {rag_score:.4f}")
-    logger.info(f"   LLM 评分: {llm_score:.4f}")
+    logger.info(f"   GraphRAG 评分: {graphrag_score:.4f}  |  生成耗时: {graphrag_time}秒")
+    logger.info(f"   RAG 评分: {rag_score:.4f}  |  生成耗时: {rag_time}秒")
+    logger.info(f"   LLM 评分: {llm_score:.4f}  |  生成耗时: {llm_time}秒")
+    logger.info(f"   总耗时: {total_time}秒")
+    logger.info(f"   Pairwise 胜者: GRvsRAG={pairwise_results['graphrag_vs_rag']['winner']}, GRvsLLM={pairwise_results['graphrag_vs_llm']['winner']}, RAGvsLLM={pairwise_results['rag_vs_llm']['winner']}")
     logger.info("="*80 + "\n")
+    
+    _save_evaluation_report(
+        question=request.question,
+        expected_answer=request.expected_answer or "未提供参考答案",
+        graphrag_answer=graphrag_answer,
+        rag_answer=rag_answer,
+        llm_answer=llm_answer,
+        evaluation=evaluation,
+        improvement=improvement,
+        timing=timing,
+        pairwise_stats=pairwise_stats
+    )
     
     return AnswerEvaluationResponse(
         success=True,
@@ -197,6 +393,8 @@ def _sync_evaluate_answer(request: AnswerEvaluationRequest) -> AnswerEvaluationR
         llm_answer=llm_answer,
         evaluation=evaluation,
         improvement=improvement,
+        timing=timing,
+        pairwise=pairwise_stats,
         trace={
             "graphrag": {
                 "context_snippet": graphrag_context,
